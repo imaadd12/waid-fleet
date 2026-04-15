@@ -26,6 +26,21 @@ export function AdminRoute({ children }) {
     return <Navigate to="/login" replace />
   }
 
+  // Token exists but user profile is still being fetched → keep the spinner
+  if (!user) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        minHeight: '100vh', background: 'var(--bg-deep)', color: 'var(--primary-accent)',
+        fontSize: '1rem', fontWeight: '500', gap: '10px'
+      }}>
+        <div style={{ width: '20px', height: '20px', border: '2px solid rgba(99,102,241,0.3)', borderTopColor: '#818cf8', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        Verifying admin access...
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    )
+  }
+
   // Logged in but NOT admin → show hard block screen
   const adminRoles = ['admin', 'super_admin', 'superadmin', 'sub_admin', 'finance', 'operations', 'support', 'manager']
   if (user && !adminRoles.includes(user.role)) {

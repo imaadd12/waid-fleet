@@ -23,16 +23,18 @@ export function AuthProvider({ children }) {
       const res = await fetch('/api/auth/profile', {
         headers: { Authorization: `Bearer ${authToken}` },
       })
-      const data = await res.json()
       if (res.ok) {
+        const data = await res.json()
         setUser(data.data)
-      } else {
-        // invalid or expired token
+      } else if (res.status === 401) {
+        // Token is invalid or expired — clear session so the user can re-login
         logout()
       }
+      // For 403 (suspended) or 5xx (server error) we keep the token in place;
+      // the user stays on whatever page they navigated to and can retry.
     } catch (err) {
+      // Network error — keep the token, don't force a logout
       console.error('Profile fetch error:', err)
-      logout()
     } finally {
       setLoading(false)
     }
