@@ -7,12 +7,13 @@ const protect = async (req, res, next) => {
   let token;
 
   if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+    token = req.headers.authorization.split(" ")[1];
+
     try {
-      token = req.headers.authorization.split(" ")[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      
+
       let user = await AdminUser.findById(decoded.id).select("-password");
-      
+
       if (!user) {
         user = await User.findById(decoded.id).select("-password");
       }
@@ -47,9 +48,19 @@ const protect = async (req, res, next) => {
       }
 
       req.user = user;
-      next();
+      return next();
     } catch (error) {
-      return res.status(401).json({ message: "Not authorized, token failed" });
+      // JWT-specific errors mean the token itself is bad → 401
+      if (
+        error.name === "JsonWebTokenError" ||
+        error.name === "TokenExpiredError" ||
+        error.name === "NotBeforeError"
+      ) {
+        return res.status(401).json({ message: "Not authorized, token failed" });
+      }
+      // Any other error (e.g. DB connection failure) is a server problem, not an auth failure
+      console.error("Auth middleware error:", error);
+      return res.status(500).json({ success: false, message: "Authentication service unavailable" });
     }
   }
 
