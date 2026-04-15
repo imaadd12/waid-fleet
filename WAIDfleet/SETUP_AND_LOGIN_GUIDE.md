@@ -60,20 +60,17 @@ npx vite
 
 After setting up the frontend, use these test accounts:
 
-### Driver Login
-- **Email:** driver@test.com
-- **Password:** password123
-- **Role:** Driver
+### Admin Login (Admin Gateway)
+- **Email:** admin@waidfleet.com
+- **Password:** Admin@123
+- **Role:** super_admin
 
-### Admin Login
-- **Email:** admin@test.com
-- **Password:** admin123
-- **Role:** Admin
+### Driver Login (Driver Terminal)
+- **Email:** driver@waidfleet.com
+- **Password:** Driver@123
+- **Role:** driver
 
-### Passenger Login
-- **Email:** passenger@test.com
-- **Password:** password123
-- **Role:** Passenger
+> These accounts are auto-seeded on every server startup via `utils/initAdmin.js`.
 
 ---
 
@@ -252,10 +249,8 @@ cat .env | grep MONGODB_URI
 ```
 
 ### Rate limit error?
-- This is intentional! You're getting rate limited.
-- Wait 15 minutes or:
-- Disable in development: Check `rateLimitMiddleware.js`
-- Change: `skip: (req) => process.env.NODE_ENV === "development"`
+- The auth rate limiter is automatically disabled when `NODE_ENV=development`.
+- In production it allows 5 auth attempts per 15 minutes per IP.
 
 ---
 
@@ -293,11 +288,7 @@ cat .env | grep MONGODB_URI
    - Manage authentication tokens
    - Save request collections
 
-2. **Toggle Rate Limiting** - In development:
-   ```javascript
-   // In middleware/rateLimitMiddleware.js
-   skip: (req) => process.env.NODE_ENV === "development"
-   ```
+2. **Toggle Rate Limiting** - Auth rate limiting is automatically skipped in development (`NODE_ENV=development`).
 
 3. **View Logs** - Check backend logs:
    ```bash
