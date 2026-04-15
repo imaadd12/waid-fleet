@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Admin User",
+    "email": "admin@waidfleet.com",
+    "password": "$2b$10$WA.OcmeldUuo9aUHtyfIpeRbo11g1.CoqT3DGnLLqv3ZiwqKZT0Gq",
+    "role": "admin",
+    "phone": "9876543210",
+    "isActive": true,
+    "createdAt": { "$date": "2025-01-01T00:00:00.000Z" },
+    "updatedAt": { "$date": "2025-01-01T00:00:00.000Z" }
+  },
+  {
+    "name": "John Driver",
+    "email": "driver@waidfleet.com",
+    "password": "$2b$10$WA.OcmeldUuo9aUHtyfIpezvval2EBFyl16h40m.Qm1OmaAmam7N.",
+    "role": "driver",
+    "phone": "9000000001",
+    "isActive": true,
+    "createdAt": { "$date": "2025-01-01T00:00:00.000Z" },
+    "updatedAt": { "$date": "2025-01-01T00:00:00.000Z" }
+  },
+  {
+    "name": "Jane Client",
+    "email": "client@waidfleet.com",
+    "password": "$2b$10$WA.OcmeldUuo9aUHtyfIpeNZp/v/sP78m.GyHDF27i8xkgmV3HHxS",
+    "role": "client",
+    "phone": "9000000002",
+    "isActive": true,
+    "createdAt": { "$date": "2025-01-01T00:00:00.000Z" },
+    "updatedAt": { "$date": "2025-01-01T00:00:00.000Z" }
+  }
+]
