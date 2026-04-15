@@ -38,8 +38,11 @@ const ADMIN_PERMISSIONS = [
  */
 const initAdmin = async () => {
   // ── AdminUser model (primary auth model for admin portal) ──────────────
+  // Skip creation if the email already exists in the User collection to avoid
+  // shadowing existing credentials with the default Admin@123 password.
   const existingAdminUser = await AdminUser.findOne({ email: DEFAULT_ADMIN_EMAIL });
-  if (!existingAdminUser) {
+  const existingUserWithAdminEmail = await User.findOne({ email: DEFAULT_ADMIN_EMAIL });
+  if (!existingAdminUser && !existingUserWithAdminEmail) {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, salt);
 
@@ -55,8 +58,7 @@ const initAdmin = async () => {
   }
 
   // ── User model (fallback / legacy auth) ────────────────────────────────
-  const existingUser = await User.findOne({ email: DEFAULT_ADMIN_EMAIL });
-  if (!existingUser) {
+  if (!existingUserWithAdminEmail) {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, salt);
 
