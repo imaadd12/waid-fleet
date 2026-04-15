@@ -93,6 +93,9 @@ loadRoute("./routes/gamificationRoutes", "/api/surge");
 loadRoute("./routes/gamificationRoutes", "/api/referral");
 loadRoute("./routes/gamificationRoutes", "/api/gamification");
 
+loadRoute("./routes/fuelRoutes", "/api/fuel");
+loadRoute("./routes/zoneRoutes", "/api/zones");
+
 // ============ TEST ============
 app.get("/test", (req, res) => {
   res.send("Backend is working!");
