@@ -1,19 +1,35 @@
-import { useState, useEffect, useContext, useCallback } from 'react'
+import { useState, useEffect, useContext, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AuthContext } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import {
   Shield, Users, Car, DollarSign, AlertOctagon, BarChart2,
   Settings, LogOut, Lock, Unlock, Search,
   ChevronRight, Activity, UserCheck, UserX, TrendingUp, Bell, 
   MapPin, Clock, FileText, LayoutDashboard, Globe, ShieldAlert,
   Navigation, CreditCard, Wrench, ShieldCheck, Database, 
-  Fingerprint, Briefcase, Mail, Smartphone, Zap, Server
+  Fingerprint, Briefcase, Mail, Smartphone, Zap, Server,
+  Fuel, Route, Layers, Plus, X, Download, Eye, RefreshCw,
+  CheckCircle, XCircle, AlertCircle, Edit, Trash2, Send
 } from 'lucide-react'
+
+// ─── Helper: download CSV in browser ───
+function downloadCSV(filename, rows) {
+  const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
 
 const SECTION = {
   OVERVIEW:   'overview',
   DRIVERS:    'drivers',
   VEHICLES:   'vehicles',
+  TRIPS:      'trips',
+  FUEL:       'fuel',
+  ZONES:      'zones',
   FINANCIALS: 'financials',
   INCIDENTS:  'accidents',
   ACCESS:     'access',
@@ -42,17 +58,21 @@ const NAV_ITEMS = [
   { id: SECTION.DRIVERS,    icon: <Users size={20}/>,           label: 'Driver Management', permission: 'view_drivers' },
   { id: SECTION.TRACKING,   icon: <Navigation size={20}/>,      label: 'Live Tracking', permission: 'view_live_map' },
   { id: SECTION.VEHICLES,   icon: <Car size={20}/>,             label: 'Vehicles', permission: 'view_vehicles' },
+  { id: SECTION.TRIPS,      icon: <Route size={20}/>,           label: 'Trip Management', permission: 'view_drivers' },
+  { id: SECTION.FUEL,       icon: <Fuel size={20}/>,            label: 'Fuel Management', permission: 'view_maintenance' },
+  { id: SECTION.ZONES,      icon: <Layers size={20}/>,          label: 'Zone Management', permission: 'manage_vehicles' },
   { id: SECTION.BILLING,    icon: <CreditCard size={20}/>,      label: 'Billing & Payouts', permission: 'manage_financials' },
   { id: SECTION.INCIDENTS,  icon: <ShieldAlert size={20}/>,     label: 'Accidents & Traffic', permission: 'view_incidents' },
   { id: SECTION.ACCESS,     icon: <Lock size={20}/>,            label: 'Access Terminal', permission: 'access_control' },
   { id: SECTION.SUBADMINS,  icon: <Shield size={20}/>,          label: 'Sub-Admins', permission: 'manage_subadmins' },
   { id: SECTION.SERVICES,   icon: <Wrench size={20}/>,          label: 'Vehicle Services', permission: 'view_maintenance' },
-  { id: SECTION.PERFORMANCE,icon: <BarChart2 size={20}/>,      label: 'Performance Logic', permission: 'view_reports' },
+  { id: SECTION.PERFORMANCE,icon: <BarChart2 size={20}/>,       label: 'Performance Logic', permission: 'view_reports' },
   { id: SECTION.SETTINGS,   icon: <Settings size={20}/>,        label: 'Platform Settings', permission: 'settings_manage' },
 ]
 
 export function AdminPanel() {
   const { user, logout } = useContext(AuthContext)
+  const { toast } = useToast()
   const navigate = useNavigate()
   const [section, setSection] = useState(SECTION.OVERVIEW)
   const [drivers, setDrivers] = useState([])
@@ -76,15 +96,65 @@ export function AdminPanel() {
   const [analyticsData, setAnalyticsData] = useState(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   
-  // Bulk Driver Enrollment State (Restored)
-  // UI Modals
+  // Bulk Driver Enrollment
   const [showBulkModal, setShowBulkModal] = useState(false)
   const [showDriverModal, setShowDriverModal] = useState(false)
   const [showVehicleAddModal, setShowVehicleAddModal] = useState(false)
   const [showAccidentModal, setShowAccidentModal] = useState(false)
-  
   const [bulkData, setBulkData] = useState('')
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkResult, setBulkResult] = useState(null)
+
+  // Trip Management
+  const [trips, setTrips] = useState([])
+  const [tripStats, setTripStats] = useState(null)
+  const [showTripModal, setShowTripModal] = useState(false)
+  const [tripFilter, setTripFilter] = useState('all')
+  const [tripForm, setTripForm] = useState({ driverId: '', vehicleId: '', pickupAddress: '', dropAddress: '', passengerName: '', passengerPhone: '', fare: '' })
+
+  // Fuel Management
+  const [fuelLogs, setFuelLogs] = useState([])
+  const [fuelStats, setFuelStats] = useState(null)
+  const [showFuelModal, setShowFuelModal] = useState(false)
+  const [fuelForm, setFuelForm] = useState({ vehicleId: '', driverId: '', fuelAmount: '', fuelCost: '', odometer: '', fuelType: 'petrol', station: '', notes: '' })
+
+  // Zone Management
+  const [zones, setZones] = useState([])
+  const [showZoneModal, setShowZoneModal] = useState(false)
+  const [showZoneDetailModal, setShowZoneDetailModal] = useState(false)
+  const [selectedZone, setSelectedZone] = useState(null)
+  const [zoneForm, setZoneForm] = useState({ name: '', city: '', state: '', description: '', color: '#6366f1' })
+  const [zoneAssignDriver, setZoneAssignDriver] = useState('')
+  const [zoneAssignVehicle, setZoneAssignVehicle] = useState('')
+
+  // Sub-admin edit
+  const [editingSubAdmin, setEditingSubAdmin] = useState(null)
+
+  // Security settings
+  const [pwForm, setPwForm] = useState({ current: '', newPass: '', confirm: '' })
+  const [show2FAModal, setShow2FAModal] = useState(false)
+
+  // Profile edit
+  const [showProfileEditModal, setShowProfileEditModal] = useState(false)
+  const [profileEditForm, setProfileEditForm] = useState({ name: '', phone: '' })
+
+  // Vehicle detail extras
+  const [reassigningDriver, setReassigningDriver] = useState(false)
+  const [newAssignedDriver, setNewAssignedDriver] = useState('')
+  const [showAlertForm, setShowAlertForm] = useState(false)
+  const [alertMessage, setAlertMessage] = useState('')
+
+  // Bill detail modal
+  const [selectedBill, setSelectedBill] = useState(null)
+  const [showBillDetailModal, setShowBillDetailModal] = useState(false)
+
+  // Service section search
+  const [serviceSearch, setServiceSearch] = useState('')
+
+  // Notifications bell
+  const [notifications, setNotifications] = useState([])
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false)
+  const notifRef = useRef(null)
 
   // Registration Forms
   const [driverForm, setDriverForm] = useState({ 
@@ -117,9 +187,10 @@ export function AdminPanel() {
   const [auditLogs, setAuditLogs] = useState([])
   const [fleetHealth, setFleetHealth] = useState(null)
   
-  // Tab States for new Unified Hubs
-  const [billTab, setBillTab] = useState('active') // active | payouts | overdue
-  const [serviceTab, setServiceTab] = useState('history') // history | metrics | shop
+  // Tab States
+  const [billTab, setBillTab] = useState('active')
+  const [serviceTab, setServiceTab] = useState('history')
+  const [auditSearch, setAuditSearch] = useState('')
 
   const ALL_PERMISSIONS = [
     { key: 'dashboard',          label: 'System Dashboard' },
@@ -143,59 +214,111 @@ export function AdminPanel() {
 
   useEffect(() => { fetchAll() }, [])
 
+  // Close notif dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => { if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifDropdown(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
   const fetchBills = useCallback(async () => {
     try {
-      const res = await fetch('/api/billing', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/billing', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setBills(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
 
   const fetchConfig = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/config', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setConfig(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
 
   const fetchAuditLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/audit-logs?limit=50', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/admin/audit-logs?limit=50', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setAuditLogs(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
 
   const fetchFleetHealth = useCallback(async () => {
     try {
-      const res = await fetch('/api/performance/admin/fleet-health', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/performance/admin/fleet-health', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setFleetHealth(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
+
+  const fetchTrips = useCallback(async () => {
+    try {
+      const statusQ = tripFilter !== 'all' ? `&status=${tripFilter}` : ''
+      const res = await fetch(`/api/trips/admin/all?limit=100${statusQ}`, { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setTrips(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [tripFilter])
+
+  const fetchTripStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/trips/admin/stats', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setTripStats(data.data)
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchFuelLogs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/fuel?limit=100', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setFuelLogs(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchFuelStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/fuel/stats', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setFuelStats(data.data)
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchZones = useCallback(async () => {
+    try {
+      const res = await fetch('/api/zones', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setZones(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch('/api/notifications?limit=10', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setNotifications(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [])
+
+  useEffect(() => {
+    if (section === SECTION.TRIPS) { fetchTrips(); fetchTripStats() }
+    if (section === SECTION.FUEL) { fetchFuelLogs(); fetchFuelStats() }
+    if (section === SECTION.ZONES) fetchZones()
+  }, [section, tripFilter])
 
   const updateSystemConfig = async (update) => {
     try {
       const res = await fetch('/api/admin/config', {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token()}` 
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify(update)
       })
       const data = await res.json()
-      if (data.success) setConfig(data.data)
-    } catch (e) { console.error(e) }
+      if (data.success) { setConfig(data.data); toast.success('Settings updated') }
+      else toast.error(data.message || 'Failed to update settings')
+    } catch (e) { toast.error('Network error') }
   }
 
   const fetchAll = useCallback(async () => {
@@ -214,20 +337,309 @@ export function AdminPanel() {
       setIncidents(iData.data || [])
       setSubAdmins(saData.data || [])
       await Promise.all([fetchBills(), fetchConfig()])
+      fetchNotifications()
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
-  }, [fetchBills, fetchConfig, fetchAuditLogs])
+  }, [fetchBills, fetchConfig])
 
   const handleCreateSubAdmin = async (e) => {
     e.preventDefault()
     setSaLoading(true)
     try {
-      const res = await fetch('/api/admin/subadmins', {
+      const url = editingSubAdmin ? `/api/admin/subadmins/${editingSubAdmin._id}/permissions` : '/api/admin/subadmins'
+      const method = editingSubAdmin ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(saForm)
+      })
+      const data = await res.json()
+      if (data.success) {
+        if (editingSubAdmin) {
+          setSubAdmins(prev => prev.map(sa => sa._id === editingSubAdmin._id ? data.data : sa))
+          toast.success('Sub-admin updated')
+        } else {
+          setSubAdmins(prev => [...prev, data.data])
+          toast.success('Sub-admin created successfully')
+        }
+        setShowCreateModal(false)
+        setEditingSubAdmin(null)
+        setSaForm({ name: '', email: '', password: '', phone: '', designation: '', permissions: [], isTemporary: false, accessStartsAt: '', accessExpiresAt: '' })
+      } else {
+        toast.error(data.message || 'Failed to save sub-admin')
+      }
+    } catch (e) { toast.error('Network error') }
+    setSaLoading(false)
+  }
+
+  const handleRevokeSubAdmin = async (id) => {
+    if (!window.confirm('Permanently revoke this sub-admin account?')) return
+    try {
+      const res = await fetch(`/api/admin/subadmins/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) { setSubAdmins(prev => prev.filter(sa => sa._id !== id)); toast.success('Sub-admin revoked') }
+      else toast.error(data.message || 'Failed to revoke')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleCreateTrip = async (e) => {
+    e.preventDefault()
+    try {
+      const body = {
+        driverId: tripForm.driverId || undefined,
+        vehicleId: tripForm.vehicleId || undefined,
+        pickupLocation: { address: tripForm.pickupAddress },
+        dropLocation: { address: tripForm.dropAddress },
+        passengerDetails: { name: tripForm.passengerName, phone: tripForm.passengerPhone },
+        fare: parseFloat(tripForm.fare) || 0
+      }
+      const res = await fetch('/api/trips/admin/create', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token()}` 
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(body)
+      })
+      const data = await res.json()
+      if (data.success) {
+        setTrips(prev => [data.data, ...prev])
+        setShowTripModal(false)
+        setTripForm({ driverId: '', vehicleId: '', pickupAddress: '', dropAddress: '', passengerName: '', passengerPhone: '', fare: '' })
+        toast.success('Trip created successfully')
+        fetchTripStats()
+      } else toast.error(data.message || 'Failed to create trip')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleUpdateTripStatus = async (tripId, status) => {
+    try {
+      const res = await fetch(`/api/trips/admin/${tripId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ status })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setTrips(prev => prev.map(t => t._id === tripId ? { ...t, status } : t))
+        toast.success('Trip status updated')
+      } else toast.error(data.message || 'Failed to update')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleDeleteTrip = async (tripId) => {
+    if (!window.confirm('Delete this trip record?')) return
+    try {
+      const res = await fetch(`/api/trips/admin/${tripId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) { setTrips(prev => prev.filter(t => t._id !== tripId)); toast.success('Trip deleted') }
+      else toast.error(data.message || 'Failed to delete')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleAddFuelLog = async (e) => {
+    e.preventDefault()
+    try {
+      const res = await fetch('/api/fuel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ ...fuelForm, fuelAmount: parseFloat(fuelForm.fuelAmount), fuelCost: parseFloat(fuelForm.fuelCost), odometer: fuelForm.odometer ? parseFloat(fuelForm.odometer) : undefined })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setFuelLogs(prev => [data.data, ...prev])
+        setShowFuelModal(false)
+        setFuelForm({ vehicleId: '', driverId: '', fuelAmount: '', fuelCost: '', odometer: '', fuelType: 'petrol', station: '', notes: '' })
+        toast.success('Fuel log added')
+        fetchFuelStats()
+      } else toast.error(data.message || 'Failed to add fuel log')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleCreateZone = async (e) => {
+    e.preventDefault()
+    try {
+      const res = await fetch('/api/zones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(zoneForm)
+      })
+      const data = await res.json()
+      if (data.success) {
+        setZones(prev => [...prev, data.data])
+        setShowZoneModal(false)
+        setZoneForm({ name: '', city: '', state: '', description: '', color: '#6366f1' })
+        toast.success('Zone created')
+      } else toast.error(data.message || 'Failed to create zone')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleDeleteZone = async (id) => {
+    if (!window.confirm('Delete this zone?')) return
+    try {
+      const res = await fetch(`/api/zones/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) { setZones(prev => prev.filter(z => z._id !== id)); toast.success('Zone deleted') }
+      else toast.error(data.message || 'Failed to delete')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleZoneAssignDriver = async (zoneId) => {
+    if (!zoneAssignDriver) return
+    try {
+      const res = await fetch(`/api/zones/${zoneId}/assign-driver`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ driverId: zoneAssignDriver })
+      })
+      const data = await res.json()
+      if (data.success) { setSelectedZone(data.data); setZones(prev => prev.map(z => z._id === zoneId ? data.data : z)); setZoneAssignDriver(''); toast.success('Driver assigned to zone') }
+      else toast.error(data.message || 'Failed')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleZoneRemoveDriver = async (zoneId, driverId) => {
+    try {
+      const res = await fetch(`/api/zones/${zoneId}/remove-driver`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ driverId })
+      })
+      const data = await res.json()
+      if (data.success) { setSelectedZone(data.data); setZones(prev => prev.map(z => z._id === zoneId ? data.data : z)); toast.success('Driver removed from zone') }
+      else toast.error(data.message || 'Failed')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleZoneAssignVehicle = async (zoneId) => {
+    if (!zoneAssignVehicle) return
+    try {
+      const res = await fetch(`/api/zones/${zoneId}/assign-vehicle`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ vehicleId: zoneAssignVehicle })
+      })
+      const data = await res.json()
+      if (data.success) { setSelectedZone(data.data); setZones(prev => prev.map(z => z._id === zoneId ? data.data : z)); setZoneAssignVehicle(''); toast.success('Vehicle assigned to zone') }
+      else toast.error(data.message || 'Failed')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleChangePassword = async () => {
+    if (!pwForm.current || !pwForm.newPass) { toast.error('Please fill all password fields'); return }
+    if (pwForm.newPass !== pwForm.confirm) { toast.error('New passwords do not match'); return }
+    if (pwForm.newPass.length < 6) { toast.error('Password must be at least 6 characters'); return }
+    try {
+      const res = await fetch(`/api/admin/users/${user?._id}/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.newPass })
+      })
+      const data = await res.json()
+      if (data.success) { toast.success('Password updated successfully'); setPwForm({ current: '', newPass: '', confirm: '' }) }
+      else toast.error(data.message || 'Failed to change password')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleUpdateProfile = async () => {
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(profileEditForm)
+      })
+      const data = await res.json()
+      if (data.success || res.ok) { toast.success('Profile updated'); setShowProfileEditModal(false) }
+      else toast.error(data.message || 'Failed to update profile')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleBulkEnroll = async () => {
+    if (!bulkData.trim()) { toast.error('No data entered'); return }
+    setBulkLoading(true)
+    setBulkResult(null)
+    try {
+      const lines = bulkData.trim().split('\n').filter(l => l.trim())
+      const drivers = lines.map(line => {
+        const [name, phone, email, password] = line.split(',').map(s => s.trim())
+        return { name, phone, email, password: password || 'WaidFleet@123' }
+      }).filter(d => d.name && d.phone)
+      
+      let enrolled = 0, failed = 0
+      for (const d of drivers) {
+        try {
+          const res = await fetch('/api/drivers/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+            body: JSON.stringify(d)
+          })
+          const data = await res.json()
+          if (data.success) enrolled++; else failed++
+        } catch { failed++ }
+      }
+      setBulkResult({ enrolled, failed, total: drivers.length })
+      if (enrolled > 0) { fetchAll(); toast.success(`${enrolled} drivers enrolled successfully`) }
+      if (failed > 0) toast.warning(`${failed} entries failed`)
+    } catch (e) { toast.error('Bulk enrollment failed') }
+    setBulkLoading(false)
+  }
+
+  const handleAssignDriverToVehicle = async () => {
+    if (!newAssignedDriver) { toast.error('Select a driver'); return }
+    try {
+      const res = await fetch(`/api/vehicles/${selectedVehicle._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ assignedDriver: newAssignedDriver })
+      })
+      const data = await res.json()
+      if (data.success || res.ok) {
+        const driver = drivers.find(d => d._id === newAssignedDriver)
+        setSelectedVehicle(prev => ({ ...prev, assignedDriver: driver }))
+        setVehicles(prev => prev.map(v => v._id === selectedVehicle._id ? { ...v, assignedDriver: driver } : v))
+        setReassigningDriver(false); setNewAssignedDriver('')
+        toast.success('Driver assigned to vehicle')
+      } else toast.error(data.message || 'Failed to assign driver')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleSendDriverAlert = async () => {
+    if (!alertMessage.trim()) { toast.error('Enter a message'); return }
+    try {
+      const res = await fetch('/api/notifications/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ driverId: selectedVehicle?.assignedDriver?._id, message: alertMessage, type: 'alert' })
+      })
+      const data = await res.json()
+      if (data.success || res.ok) { toast.success('Alert sent to driver'); setShowAlertForm(false); setAlertMessage('') }
+      else toast.error(data.message || 'Failed to send alert')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const exportDriversCSV = () => {
+    const rows = [
+      ['Name', 'Phone', 'Email', 'Status', 'License', 'Joined'],
+      ...drivers.map(d => [d.name, d.phone, d.email, d.isActive ? 'Active' : 'Inactive', d.licenseNumber || '', new Date(d.createdAt).toLocaleDateString()])
+    ]
+    downloadCSV('drivers_export.csv', rows)
+    toast.success('Driver list exported')
+  }
+
+  const exportBillsCSV = () => {
+    const rows = [
+      ['Bill #', 'Driver', 'Phone', 'Period Start', 'Period End', 'Amount', 'Status'],
+      ...bills.map(b => [b.billNumber, b.driverId?.name, b.driverId?.phone, new Date(b.periodStartDate).toLocaleDateString(), new Date(b.periodEndDate).toLocaleDateString(), b.finalAmount, b.billStatus])
+    ]
+    downloadCSV('payouts_export.csv', rows)
+    toast.success('Payout data exported')
+  }
+
+  const exportAuditCSV = () => {
+    const rows = [
+      ['Event', 'Module', 'Admin', 'Role', 'Date'],
+      ...auditLogs.map(l => [l.description, l.module, l.performedByName, l.performedByRole, new Date(l.createdAt).toLocaleDateString()])
+    ]
+    downloadCSV('audit_logs_export.csv', rows)
+    toast.success('Audit logs exported')
+  }
         body: JSON.stringify(saForm)
       })
       const data = await res.json()
