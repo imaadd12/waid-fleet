@@ -1,5 +1,21 @@
 const FuelLog = require("../models/fuelLogModel");
 
+const parseDateRange = (startDate, endDate) => {
+  if (!startDate && !endDate) return { dateQuery: null, error: null };
+  const parsedStart = startDate ? new Date(startDate) : null;
+  const parsedEnd = endDate ? new Date(endDate) : null;
+  if (parsedStart && isNaN(parsedStart.getTime())) {
+    return { dateQuery: null, error: "Invalid date format for startDate." };
+  }
+  if (parsedEnd && isNaN(parsedEnd.getTime())) {
+    return { dateQuery: null, error: "Invalid date format for endDate." };
+  }
+  const dateQuery = {};
+  if (parsedStart) dateQuery.$gte = parsedStart;
+  if (parsedEnd) dateQuery.$lte = parsedEnd;
+  return { dateQuery, error: null };
+};
+
 // @desc    Add a fuel log entry
 // @route   POST /api/fuel
 // @access  Private (Admin)
@@ -41,17 +57,9 @@ const getFuelLogs = async (req, res) => {
     if (vehicleId) query.vehicleId = vehicleId;
     if (driverId) query.driverId = driverId;
     if (startDate || endDate) {
-      const parsedStart = startDate ? new Date(startDate) : null;
-      const parsedEnd = endDate ? new Date(endDate) : null;
-      if (parsedStart && isNaN(parsedStart.getTime())) {
-        return res.status(400).json({ success: false, message: "Invalid date format for startDate." });
-      }
-      if (parsedEnd && isNaN(parsedEnd.getTime())) {
-        return res.status(400).json({ success: false, message: "Invalid date format for endDate." });
-      }
-      query.date = {};
-      if (parsedStart) query.date.$gte = parsedStart;
-      if (parsedEnd) query.date.$lte = parsedEnd;
+      const { dateQuery, error } = parseDateRange(startDate, endDate);
+      if (error) return res.status(400).json({ success: false, message: error });
+      query.date = dateQuery;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -121,17 +129,9 @@ const getFuelStats = async (req, res) => {
 
     const matchStage = {};
     if (startDate || endDate) {
-      const parsedStart = startDate ? new Date(startDate) : null;
-      const parsedEnd = endDate ? new Date(endDate) : null;
-      if (parsedStart && isNaN(parsedStart.getTime())) {
-        return res.status(400).json({ success: false, message: "Invalid date format for startDate." });
-      }
-      if (parsedEnd && isNaN(parsedEnd.getTime())) {
-        return res.status(400).json({ success: false, message: "Invalid date format for endDate." });
-      }
-      matchStage.date = {};
-      if (parsedStart) matchStage.date.$gte = parsedStart;
-      if (parsedEnd) matchStage.date.$lte = parsedEnd;
+      const { dateQuery, error } = parseDateRange(startDate, endDate);
+      if (error) return res.status(400).json({ success: false, message: error });
+      matchStage.date = dateQuery;
     }
 
     const [overall, byVehicle, odometerLogs] = await Promise.all([
