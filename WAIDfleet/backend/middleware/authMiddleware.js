@@ -49,7 +49,15 @@ const protect = async (req, res, next) => {
       req.user = user;
       next();
     } catch (error) {
-      return res.status(401).json({ message: "Not authorized, token failed" });
+      // Only treat JWT-specific errors as 401; DB or unexpected errors become 500
+      if (
+        error.name === "JsonWebTokenError" ||
+        error.name === "TokenExpiredError" ||
+        error.name === "NotBeforeError"
+      ) {
+        return res.status(401).json({ message: "Not authorized, token failed" });
+      }
+      return res.status(500).json({ message: "Authentication service error" });
     }
   }
 

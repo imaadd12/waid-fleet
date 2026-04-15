@@ -29,7 +29,10 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 // ============ RATE LIMIT ============
-app.use("/api/auth", authLimiter);
+// Apply auth limiter only to endpoints that should be rate-limited (not profile)
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
+app.use("/api/auth/reset-password", authLimiter);
 app.use("/api/payments", paymentLimiter);
 app.use("/api/admin", adminLimiter);
 app.use(generalLimiter);

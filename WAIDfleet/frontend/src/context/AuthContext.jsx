@@ -24,13 +24,12 @@ export function AuthProvider({ children }) {
       const data = await res.json()
       if (res.ok) {
         setUser(data.data)
-      } else {
-        // invalid token
+      } else if (res.status === 401 || res.status === 403) {
+        // Only clear session for genuine auth failures, not server/rate-limit errors
         logout()
       }
     } catch (err) {
       console.error('Profile fetch error:', err)
-      logout()
     } finally {
       setLoading(false)
     }
@@ -59,8 +58,8 @@ export function AuthProvider({ children }) {
 
     const newToken = data.token
     setToken(newToken)
+    setUser(data.data)
     localStorage.setItem('token', newToken)
-    await fetchProfile(newToken)
     return data
   }
 
