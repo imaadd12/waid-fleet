@@ -16,6 +16,7 @@ const authLimiter = rateLimit({
   max: 5,
   message: "Too many authentication attempts, please try again later.",
   skipSuccessfulRequests: true, // Don't count successful requests
+  skip: (req) => process.env.NODE_ENV === "development",
 });
 
 // Payment limiter - 20 requests per hour
