@@ -87,6 +87,7 @@ loadRoute("./routes/documentRoutes", "/api/documents");
 loadRoute("./routes/passengerRoutes", "/api/passengers");
 loadRoute("./routes/operationsRoutes", "/api/operations");
 loadRoute("./routes/tripRoutes", "/api/trips");
+loadRoute("./routes/serviceRoutes", "/api/services");
 
 loadRoute("./routes/gamificationRoutes", "/api/surge");
 loadRoute("./routes/gamificationRoutes", "/api/referral");

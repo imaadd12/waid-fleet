@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const SystemConfig = require("../models/systemConfigModel");
 const AdminUser = require("../models/adminUserModel");
+const User = require("../models/userModel");
 
 const protect = async (req, res, next) => {
   let token;
