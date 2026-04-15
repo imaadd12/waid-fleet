@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react'
 
 const CONFIG = {
@@ -10,18 +10,21 @@ const CONFIG = {
 
 function Toast({ id, type, message, onDismiss }) {
   const [visible, setVisible] = useState(false)
+  const exitTimer = useRef(null)
 
   useEffect(() => {
-    // Trigger entrance animation after mount
     const frame = requestAnimationFrame(() => setVisible(true))
-    return () => cancelAnimationFrame(frame)
+    return () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(exitTimer.current)
+    }
   }, [])
 
   const { icon: Icon, color, glow } = CONFIG[type] ?? CONFIG.info
 
   const handleDismiss = () => {
     setVisible(false)
-    setTimeout(() => onDismiss(id), 280)
+    exitTimer.current = setTimeout(() => onDismiss(id), 280)
   }
 
   return (
@@ -133,13 +136,10 @@ export function ToastContainer({ toasts, onDismiss }) {
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
-        pointerEvents: 'none',
       }}
     >
       {toasts.map((t) => (
-        <div key={t.id} style={{ pointerEvents: 'auto' }}>
-          <Toast {...t} onDismiss={onDismiss} />
-        </div>
+        <Toast key={t.id} {...t} onDismiss={onDismiss} />
       ))}
     </div>
   )
