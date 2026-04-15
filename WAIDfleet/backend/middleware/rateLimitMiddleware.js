@@ -10,10 +10,10 @@ const generalLimiter = rateLimit({
         skip: (req) => process.env.NODE_ENV === "development",
 });
 
-// Strict rate limiter for authentication - 5 requests per 15 minutes
+// Strict rate limiter for authentication - 20 requests per 15 minutes
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 20,
   message: "Too many authentication attempts, please try again later.",
   skipSuccessfulRequests: true, // Don't count successful requests
   skip: (req) => process.env.NODE_ENV === "development",
