@@ -245,7 +245,10 @@ exports.updateTripStatusAdmin = asyncHandler(async (req, res) => {
   }
 
   if (status === "in_progress" && !trip.startTime) trip.startTime = new Date();
-  if (status === "completed" && !trip.endTime) trip.endTime = new Date();
+  if (status === "completed") {
+    if (!trip.startTime) trip.startTime = new Date();
+    if (!trip.endTime) trip.endTime = new Date();
+  }
 
   trip.status = status;
   await trip.save();
@@ -277,7 +280,7 @@ exports.getTripStatsAdmin = asyncHandler(async (req, res) => {
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]),
     Trip.countDocuments(),
-    Trip.countDocuments({ date: { $gte: startOfToday } }),
+    Trip.countDocuments({ createdAt: { $gte: startOfToday } }),
     Trip.aggregate([
       { $group: { _id: null, totalRevenue: { $sum: "$fare" }, avgFare: { $avg: "$fare" } } },
     ]),
