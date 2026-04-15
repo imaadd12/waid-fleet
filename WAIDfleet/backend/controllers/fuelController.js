@@ -41,9 +41,17 @@ const getFuelLogs = async (req, res) => {
     if (vehicleId) query.vehicleId = vehicleId;
     if (driverId) query.driverId = driverId;
     if (startDate || endDate) {
+      const parsedStart = startDate ? new Date(startDate) : null;
+      const parsedEnd = endDate ? new Date(endDate) : null;
+      if (parsedStart && isNaN(parsedStart.getTime())) {
+        return res.status(400).json({ success: false, message: "Invalid date format for startDate." });
+      }
+      if (parsedEnd && isNaN(parsedEnd.getTime())) {
+        return res.status(400).json({ success: false, message: "Invalid date format for endDate." });
+      }
       query.date = {};
-      if (startDate) query.date.$gte = new Date(startDate);
-      if (endDate) query.date.$lte = new Date(endDate);
+      if (parsedStart) query.date.$gte = parsedStart;
+      if (parsedEnd) query.date.$lte = parsedEnd;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -113,9 +121,17 @@ const getFuelStats = async (req, res) => {
 
     const matchStage = {};
     if (startDate || endDate) {
+      const parsedStart = startDate ? new Date(startDate) : null;
+      const parsedEnd = endDate ? new Date(endDate) : null;
+      if (parsedStart && isNaN(parsedStart.getTime())) {
+        return res.status(400).json({ success: false, message: "Invalid date format for startDate." });
+      }
+      if (parsedEnd && isNaN(parsedEnd.getTime())) {
+        return res.status(400).json({ success: false, message: "Invalid date format for endDate." });
+      }
       matchStage.date = {};
-      if (startDate) matchStage.date.$gte = new Date(startDate);
-      if (endDate) matchStage.date.$lte = new Date(endDate);
+      if (parsedStart) matchStage.date.$gte = parsedStart;
+      if (parsedEnd) matchStage.date.$lte = parsedEnd;
     }
 
     const [overall, byVehicle, odometerLogs] = await Promise.all([

@@ -52,7 +52,17 @@ const getZones = async (req, res) => {
 // @access  Private (Admin)
 const updateZone = async (req, res) => {
   try {
-    const zone = await Zone.findByIdAndUpdate(req.params.id, req.body, {
+    const { name, city, state, description, color, isActive, coordinates } = req.body;
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (city !== undefined) updates.city = city;
+    if (state !== undefined) updates.state = state;
+    if (description !== undefined) updates.description = description;
+    if (color !== undefined) updates.color = color;
+    if (isActive !== undefined) updates.isActive = isActive;
+    if (coordinates !== undefined) updates.coordinates = coordinates;
+
+    const zone = await Zone.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,
     })
