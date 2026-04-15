@@ -1,4 +1,4 @@
-import { createContext, useState, useEffect } from 'react'
+import { createContext, useState, useEffect, useCallback } from 'react'
 
 export const AuthContext = createContext()
 
@@ -7,16 +7,18 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    // if token exists, try to fetch profile on mount
-    if (token) {
-      fetchProfile()
-    } else {
-      setLoading(false)
-    }
-  }, [token])
+  const logout = useCallback(() => {
+    setToken('')
+    setUser(null)
+    localStorage.removeItem('token')
+  }, [])
 
-  const fetchProfile = async (authToken = token) => {
+  const fetchProfile = useCallback(async (authToken) => {
+    if (!authToken) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
     try {
       const res = await fetch('/api/auth/profile', {
         headers: { Authorization: `Bearer ${authToken}` },
@@ -25,7 +27,7 @@ export function AuthProvider({ children }) {
       if (res.ok) {
         setUser(data.data)
       } else {
-        // invalid token
+        // invalid or expired token
         logout()
       }
     } catch (err) {
@@ -34,7 +36,15 @@ export function AuthProvider({ children }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [logout])
+
+  useEffect(() => {
+    if (token) {
+      fetchProfile(token)
+    } else {
+      setLoading(false)
+    }
+  }, [token, fetchProfile])
 
   const login = async (email, password, portal = null) => {
     const res = await fetch('/api/auth/login', {
@@ -54,13 +64,14 @@ export function AuthProvider({ children }) {
     } catch (err) {
       throw new Error(err.message || 'Network error occurred')
     }
-    
+
     if (!res.ok) throw new Error(data?.message || 'Login failed')
 
     const newToken = data.token
-    setToken(newToken)
+    // Store token first so it's available if localStorage is read synchronously,
+    // then update state — useEffect will trigger a single fetchProfile call
     localStorage.setItem('token', newToken)
-    await fetchProfile(newToken)
+    setToken(newToken)
     return data
   }
 
@@ -73,12 +84,6 @@ export function AuthProvider({ children }) {
     const data = await res.json()
     if (!res.ok) throw new Error(data.message || 'Registration failed')
     return data
-  }
-
-  const logout = () => {
-    setToken('')
-    setUser(null)
-    localStorage.removeItem('token')
   }
 
   return (
