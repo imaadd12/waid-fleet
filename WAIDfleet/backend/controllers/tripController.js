@@ -142,3 +142,172 @@ exports.updateTripStatus = asyncHandler(async (req, res) => {
     message: `Trip marked as ${status}`
   });
 });
+
+// ─────────────────────────────────────────────
+// ADMIN ENDPOINTS
+// ─────────────────────────────────────────────
+
+// @desc    Get all trips (admin) with pagination & filters
+// @route   GET /api/trips/admin/all
+// @access  Private (Admin)
+exports.getAllTripsAdmin = asyncHandler(async (req, res) => {
+  const { status, driverId, page = 1, limit = 50 } = req.query;
+
+  const filter = {};
+  if (status) filter.status = status;
+  if (driverId) filter.driverId = driverId;
+
+  const skip = (Number(page) - 1) * Number(limit);
+
+  const [trips, total] = await Promise.all([
+    Trip.find(filter)
+      .populate("driverId", "name phone")
+      .populate("vehicleId", "name plateNumber")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit)),
+    Trip.countDocuments(filter),
+  ]);
+
+  res.json({
+    success: true,
+    total,
+    page: Number(page),
+    pages: Math.ceil(total / Number(limit)),
+    count: trips.length,
+    data: trips,
+  });
+});
+
+// @desc    Create a trip from admin
+// @route   POST /api/trips/admin/create
+// @access  Private (Admin)
+exports.createTripAdmin = asyncHandler(async (req, res) => {
+  const { driverId, vehicleId, pickupLocation, dropLocation, passengerDetails, fare } = req.body;
+
+  if (!driverId) {
+    return res.status(400).json({ success: false, message: "driverId is required" });
+  }
+
+  const trip = await Trip.create({
+    driverId,
+    vehicleId: vehicleId || undefined,
+    pickupLocation,
+    dropLocation,
+    passengerDetails,
+    fare: fare || 0,
+    status: "requested",
+  });
+
+  res.status(201).json({ success: true, data: trip });
+});
+
+// @desc    Assign a driver (and optionally vehicle) to a trip
+// @route   PUT /api/trips/admin/:id/assign
+// @access  Private (Admin)
+exports.assignDriverToTrip = asyncHandler(async (req, res) => {
+  const { driverId, vehicleId } = req.body;
+
+  if (!driverId) {
+    return res.status(400).json({ success: false, message: "driverId is required" });
+  }
+
+  const trip = await Trip.findById(req.params.id);
+  if (!trip) {
+    return res.status(404).json({ success: false, message: "Trip not found" });
+  }
+
+  trip.driverId = driverId;
+  if (vehicleId) trip.vehicleId = vehicleId;
+  if (trip.status === "requested") trip.status = "assigned";
+  await trip.save();
+
+  res.json({ success: true, data: trip, message: "Driver assigned successfully" });
+});
+
+// @desc    Admin update trip status to any valid value
+// @route   PUT /api/trips/admin/:id/status
+// @access  Private (Admin)
+exports.updateTripStatusAdmin = asyncHandler(async (req, res) => {
+  const { status } = req.body;
+  const validStatuses = ["requested", "assigned", "arrived_pickup", "in_progress", "completed", "cancelled"];
+
+  if (!status || !validStatuses.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+    });
+  }
+
+  const trip = await Trip.findById(req.params.id);
+  if (!trip) {
+    return res.status(404).json({ success: false, message: "Trip not found" });
+  }
+
+  if (status === "in_progress" && !trip.startTime) trip.startTime = new Date();
+  if (status === "completed") {
+    if (!trip.startTime) trip.startTime = new Date();
+    if (!trip.endTime) trip.endTime = new Date();
+  }
+
+  trip.status = status;
+  await trip.save();
+
+  res.json({ success: true, data: trip, message: `Trip status updated to ${status}` });
+});
+
+// @desc    Delete a trip (admin)
+// @route   DELETE /api/trips/admin/:id
+// @access  Private (Admin)
+exports.deleteTripAdmin = asyncHandler(async (req, res) => {
+  const trip = await Trip.findByIdAndDelete(req.params.id);
+  if (!trip) {
+    return res.status(404).json({ success: false, message: "Trip not found" });
+  }
+
+  res.json({ success: true, message: "Trip deleted successfully" });
+});
+
+// @desc    Get trip statistics summary
+// @route   GET /api/trips/admin/stats
+// @access  Private (Admin)
+exports.getTripStatsAdmin = asyncHandler(async (req, res) => {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const [statusCounts, totalTrips, todaysTrips, revenueData] = await Promise.all([
+    Trip.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+    Trip.countDocuments(),
+    Trip.countDocuments({ createdAt: { $gte: startOfToday } }),
+    Trip.aggregate([
+      { $group: { _id: null, totalRevenue: { $sum: "$fare" }, avgFare: { $avg: "$fare" } } },
+    ]),
+  ]);
+
+  const byStatus = {
+    requested: 0,
+    assigned: 0,
+    arrived_pickup: 0,
+    in_progress: 0,
+    completed: 0,
+    cancelled: 0,
+  };
+  statusCounts.forEach(({ _id, count }) => {
+    if (_id in byStatus) byStatus[_id] = count;
+  });
+
+  const revenue = revenueData[0] || { totalRevenue: 0, avgFare: 0 };
+
+  res.json({
+    success: true,
+    data: {
+      totalTrips,
+      todaysTrips,
+      byStatus,
+      totalRevenue: revenue.totalRevenue,
+      avgFare: revenue.avgFare ? Number(revenue.avgFare.toFixed(2)) : 0,
+    },
+  });
+});

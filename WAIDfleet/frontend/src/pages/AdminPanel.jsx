@@ -1,19 +1,35 @@
-import { useState, useEffect, useContext, useCallback } from 'react'
+import { useState, useEffect, useContext, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AuthContext } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import {
   Shield, Users, Car, DollarSign, AlertOctagon, BarChart2,
   Settings, LogOut, Lock, Unlock, Search,
   ChevronRight, Activity, UserCheck, UserX, TrendingUp, Bell, 
   MapPin, Clock, FileText, LayoutDashboard, Globe, ShieldAlert,
   Navigation, CreditCard, Wrench, ShieldCheck, Database, 
-  Fingerprint, Briefcase, Mail, Smartphone, Zap, Server
+  Fingerprint, Briefcase, Mail, Smartphone, Zap, Server,
+  Fuel, Route, Layers, Plus, X, Download, Eye, RefreshCw,
+  CheckCircle, XCircle, AlertCircle, Edit, Trash2, Send
 } from 'lucide-react'
+
+// ─── Helper: download CSV in browser ───
+function downloadCSV(filename, rows) {
+  const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
 
 const SECTION = {
   OVERVIEW:   'overview',
   DRIVERS:    'drivers',
   VEHICLES:   'vehicles',
+  TRIPS:      'trips',
+  FUEL:       'fuel',
+  ZONES:      'zones',
   FINANCIALS: 'financials',
   INCIDENTS:  'accidents',
   ACCESS:     'access',
@@ -42,17 +58,21 @@ const NAV_ITEMS = [
   { id: SECTION.DRIVERS,    icon: <Users size={20}/>,           label: 'Driver Management', permission: 'view_drivers' },
   { id: SECTION.TRACKING,   icon: <Navigation size={20}/>,      label: 'Live Tracking', permission: 'view_live_map' },
   { id: SECTION.VEHICLES,   icon: <Car size={20}/>,             label: 'Vehicles', permission: 'view_vehicles' },
+  { id: SECTION.TRIPS,      icon: <Route size={20}/>,           label: 'Trip Management', permission: 'view_drivers' },
+  { id: SECTION.FUEL,       icon: <Fuel size={20}/>,            label: 'Fuel Management', permission: 'view_maintenance' },
+  { id: SECTION.ZONES,      icon: <Layers size={20}/>,          label: 'Zone Management', permission: 'manage_vehicles' },
   { id: SECTION.BILLING,    icon: <CreditCard size={20}/>,      label: 'Billing & Payouts', permission: 'manage_financials' },
   { id: SECTION.INCIDENTS,  icon: <ShieldAlert size={20}/>,     label: 'Accidents & Traffic', permission: 'view_incidents' },
   { id: SECTION.ACCESS,     icon: <Lock size={20}/>,            label: 'Access Terminal', permission: 'access_control' },
   { id: SECTION.SUBADMINS,  icon: <Shield size={20}/>,          label: 'Sub-Admins', permission: 'manage_subadmins' },
   { id: SECTION.SERVICES,   icon: <Wrench size={20}/>,          label: 'Vehicle Services', permission: 'view_maintenance' },
-  { id: SECTION.PERFORMANCE,icon: <BarChart2 size={20}/>,      label: 'Performance Logic', permission: 'view_reports' },
+  { id: SECTION.PERFORMANCE,icon: <BarChart2 size={20}/>,       label: 'Performance Logic', permission: 'view_reports' },
   { id: SECTION.SETTINGS,   icon: <Settings size={20}/>,        label: 'Platform Settings', permission: 'settings_manage' },
 ]
 
 export function AdminPanel() {
   const { user, logout } = useContext(AuthContext)
+  const { toast } = useToast()
   const navigate = useNavigate()
   const [section, setSection] = useState(SECTION.OVERVIEW)
   const [drivers, setDrivers] = useState([])
@@ -76,15 +96,65 @@ export function AdminPanel() {
   const [analyticsData, setAnalyticsData] = useState(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   
-  // Bulk Driver Enrollment State (Restored)
-  // UI Modals
+  // Bulk Driver Enrollment
   const [showBulkModal, setShowBulkModal] = useState(false)
   const [showDriverModal, setShowDriverModal] = useState(false)
   const [showVehicleAddModal, setShowVehicleAddModal] = useState(false)
   const [showAccidentModal, setShowAccidentModal] = useState(false)
-  
   const [bulkData, setBulkData] = useState('')
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkResult, setBulkResult] = useState(null)
+
+  // Trip Management
+  const [trips, setTrips] = useState([])
+  const [tripStats, setTripStats] = useState(null)
+  const [showTripModal, setShowTripModal] = useState(false)
+  const [tripFilter, setTripFilter] = useState('all')
+  const [tripForm, setTripForm] = useState({ driverId: '', vehicleId: '', pickupAddress: '', dropAddress: '', passengerName: '', passengerPhone: '', fare: '' })
+
+  // Fuel Management
+  const [fuelLogs, setFuelLogs] = useState([])
+  const [fuelStats, setFuelStats] = useState(null)
+  const [showFuelModal, setShowFuelModal] = useState(false)
+  const [fuelForm, setFuelForm] = useState({ vehicleId: '', driverId: '', fuelAmount: '', fuelCost: '', odometer: '', fuelType: 'petrol', station: '', notes: '' })
+
+  // Zone Management
+  const [zones, setZones] = useState([])
+  const [showZoneModal, setShowZoneModal] = useState(false)
+  const [showZoneDetailModal, setShowZoneDetailModal] = useState(false)
+  const [selectedZone, setSelectedZone] = useState(null)
+  const [zoneForm, setZoneForm] = useState({ name: '', city: '', state: '', description: '', color: '#6366f1' })
+  const [zoneAssignDriver, setZoneAssignDriver] = useState('')
+  const [zoneAssignVehicle, setZoneAssignVehicle] = useState('')
+
+  // Sub-admin edit
+  const [editingSubAdmin, setEditingSubAdmin] = useState(null)
+
+  // Security settings
+  const [pwForm, setPwForm] = useState({ current: '', newPass: '', confirm: '' })
+  const [show2FAModal, setShow2FAModal] = useState(false)
+
+  // Profile edit
+  const [showProfileEditModal, setShowProfileEditModal] = useState(false)
+  const [profileEditForm, setProfileEditForm] = useState({ name: '', phone: '' })
+
+  // Vehicle detail extras
+  const [reassigningDriver, setReassigningDriver] = useState(false)
+  const [newAssignedDriver, setNewAssignedDriver] = useState('')
+  const [showAlertForm, setShowAlertForm] = useState(false)
+  const [alertMessage, setAlertMessage] = useState('')
+
+  // Bill detail modal
+  const [selectedBill, setSelectedBill] = useState(null)
+  const [showBillDetailModal, setShowBillDetailModal] = useState(false)
+
+  // Service section search
+  const [serviceSearch, setServiceSearch] = useState('')
+
+  // Notifications bell
+  const [notifications, setNotifications] = useState([])
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false)
+  const notifRef = useRef(null)
 
   // Registration Forms
   const [driverForm, setDriverForm] = useState({ 
@@ -117,9 +187,10 @@ export function AdminPanel() {
   const [auditLogs, setAuditLogs] = useState([])
   const [fleetHealth, setFleetHealth] = useState(null)
   
-  // Tab States for new Unified Hubs
-  const [billTab, setBillTab] = useState('active') // active | payouts | overdue
-  const [serviceTab, setServiceTab] = useState('history') // history | metrics | shop
+  // Tab States
+  const [billTab, setBillTab] = useState('active')
+  const [serviceTab, setServiceTab] = useState('history')
+  const [auditSearch, setAuditSearch] = useState('')
 
   const ALL_PERMISSIONS = [
     { key: 'dashboard',          label: 'System Dashboard' },
@@ -143,59 +214,111 @@ export function AdminPanel() {
 
   useEffect(() => { fetchAll() }, [])
 
+  // Close notif dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => { if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifDropdown(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
   const fetchBills = useCallback(async () => {
     try {
-      const res = await fetch('/api/billing', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/billing', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setBills(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
 
   const fetchConfig = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/config', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setConfig(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
 
   const fetchAuditLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/audit-logs?limit=50', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/admin/audit-logs?limit=50', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setAuditLogs(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
 
   const fetchFleetHealth = useCallback(async () => {
     try {
-      const res = await fetch('/api/performance/admin/fleet-health', {
-        headers: { Authorization: `Bearer ${token()}` }
-      })
+      const res = await fetch('/api/performance/admin/fleet-health', { headers: { Authorization: `Bearer ${token()}` } })
       const data = await res.json()
       if (data.success) setFleetHealth(data.data)
     } catch (e) { console.error(e) }
-  }, [token])
+  }, [])
+
+  const fetchTrips = useCallback(async () => {
+    try {
+      const statusQ = tripFilter !== 'all' ? `&status=${tripFilter}` : ''
+      const res = await fetch(`/api/trips/admin/all?limit=100${statusQ}`, { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setTrips(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [tripFilter])
+
+  const fetchTripStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/trips/admin/stats', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setTripStats(data.data)
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchFuelLogs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/fuel?limit=100', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setFuelLogs(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchFuelStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/fuel/stats', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setFuelStats(data.data)
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchZones = useCallback(async () => {
+    try {
+      const res = await fetch('/api/zones', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setZones(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch('/api/notifications?limit=10', { headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) setNotifications(data.data || [])
+    } catch (e) { console.error(e) }
+  }, [])
+
+  useEffect(() => {
+    if (section === SECTION.TRIPS) { fetchTrips(); fetchTripStats() }
+    if (section === SECTION.FUEL) { fetchFuelLogs(); fetchFuelStats() }
+    if (section === SECTION.ZONES) fetchZones()
+  }, [section, tripFilter])
 
   const updateSystemConfig = async (update) => {
     try {
       const res = await fetch('/api/admin/config', {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token()}` 
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify(update)
       })
       const data = await res.json()
-      if (data.success) setConfig(data.data)
-    } catch (e) { console.error(e) }
+      if (data.success) { setConfig(data.data); toast.success('Settings updated') }
+      else toast.error(data.message || 'Failed to update settings')
+    } catch (e) { toast.error('Network error') }
   }
 
   const fetchAll = useCallback(async () => {
@@ -214,32 +337,308 @@ export function AdminPanel() {
       setIncidents(iData.data || [])
       setSubAdmins(saData.data || [])
       await Promise.all([fetchBills(), fetchConfig()])
+      fetchNotifications()
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
-  }, [fetchBills, fetchConfig, fetchAuditLogs])
+  }, [fetchBills, fetchConfig])
 
   const handleCreateSubAdmin = async (e) => {
     e.preventDefault()
     setSaLoading(true)
     try {
-      const res = await fetch('/api/admin/subadmins', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token()}` 
-        },
+      const url = editingSubAdmin ? `/api/admin/subadmins/${editingSubAdmin._id}/permissions` : '/api/admin/subadmins'
+      const method = editingSubAdmin ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify(saForm)
       })
       const data = await res.json()
       if (data.success) {
-        setSubAdmins([...subAdmins, data.data])
+        if (editingSubAdmin) {
+          setSubAdmins(prev => prev.map(sa => sa._id === editingSubAdmin._id ? data.data : sa))
+          toast.success('Sub-admin updated')
+        } else {
+          setSubAdmins(prev => [...prev, data.data])
+          toast.success('Sub-admin created successfully')
+        }
         setShowCreateModal(false)
+        setEditingSubAdmin(null)
         setSaForm({ name: '', email: '', password: '', phone: '', designation: '', permissions: [], isTemporary: false, accessStartsAt: '', accessExpiresAt: '' })
       } else {
-        alert(data.message)
+        toast.error(data.message || 'Failed to save sub-admin')
       }
-    } catch (e) { console.error(e) }
+    } catch (e) { toast.error('Network error') }
     setSaLoading(false)
+  }
+
+  const handleRevokeSubAdmin = async (id) => {
+    if (!window.confirm('Permanently revoke this sub-admin account?')) return
+    try {
+      const res = await fetch(`/api/admin/subadmins/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) { setSubAdmins(prev => prev.filter(sa => sa._id !== id)); toast.success('Sub-admin revoked') }
+      else toast.error(data.message || 'Failed to revoke')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleCreateTrip = async (e) => {
+    e.preventDefault()
+    try {
+      const body = {
+        driverId: tripForm.driverId || undefined,
+        vehicleId: tripForm.vehicleId || undefined,
+        pickupLocation: { address: tripForm.pickupAddress },
+        dropLocation: { address: tripForm.dropAddress },
+        passengerDetails: { name: tripForm.passengerName, phone: tripForm.passengerPhone },
+        fare: parseFloat(tripForm.fare) || 0
+      }
+      const res = await fetch('/api/trips/admin/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(body)
+      })
+      const data = await res.json()
+      if (data.success) {
+        setTrips(prev => [data.data, ...prev])
+        setShowTripModal(false)
+        setTripForm({ driverId: '', vehicleId: '', pickupAddress: '', dropAddress: '', passengerName: '', passengerPhone: '', fare: '' })
+        toast.success('Trip created successfully')
+        fetchTripStats()
+      } else toast.error(data.message || 'Failed to create trip')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleUpdateTripStatus = async (tripId, status) => {
+    try {
+      const res = await fetch(`/api/trips/admin/${tripId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ status })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setTrips(prev => prev.map(t => t._id === tripId ? { ...t, status } : t))
+        toast.success('Trip status updated')
+      } else toast.error(data.message || 'Failed to update')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleDeleteTrip = async (tripId) => {
+    if (!window.confirm('Delete this trip record?')) return
+    try {
+      const res = await fetch(`/api/trips/admin/${tripId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) { setTrips(prev => prev.filter(t => t._id !== tripId)); toast.success('Trip deleted') }
+      else toast.error(data.message || 'Failed to delete')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleAddFuelLog = async (e) => {
+    e.preventDefault()
+    try {
+      const res = await fetch('/api/fuel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ ...fuelForm, fuelAmount: parseFloat(fuelForm.fuelAmount), fuelCost: parseFloat(fuelForm.fuelCost), odometer: fuelForm.odometer ? parseFloat(fuelForm.odometer) : undefined })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setFuelLogs(prev => [data.data, ...prev])
+        setShowFuelModal(false)
+        setFuelForm({ vehicleId: '', driverId: '', fuelAmount: '', fuelCost: '', odometer: '', fuelType: 'petrol', station: '', notes: '' })
+        toast.success('Fuel log added')
+        fetchFuelStats()
+      } else toast.error(data.message || 'Failed to add fuel log')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleCreateZone = async (e) => {
+    e.preventDefault()
+    try {
+      const res = await fetch('/api/zones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(zoneForm)
+      })
+      const data = await res.json()
+      if (data.success) {
+        setZones(prev => [...prev, data.data])
+        setShowZoneModal(false)
+        setZoneForm({ name: '', city: '', state: '', description: '', color: '#6366f1' })
+        toast.success('Zone created')
+      } else toast.error(data.message || 'Failed to create zone')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleDeleteZone = async (id) => {
+    if (!window.confirm('Delete this zone?')) return
+    try {
+      const res = await fetch(`/api/zones/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } })
+      const data = await res.json()
+      if (data.success) { setZones(prev => prev.filter(z => z._id !== id)); toast.success('Zone deleted') }
+      else toast.error(data.message || 'Failed to delete')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleZoneAssignDriver = async (zoneId) => {
+    if (!zoneAssignDriver) return
+    try {
+      const res = await fetch(`/api/zones/${zoneId}/assign-driver`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ driverId: zoneAssignDriver })
+      })
+      const data = await res.json()
+      if (data.success) { setSelectedZone(data.data); setZones(prev => prev.map(z => z._id === zoneId ? data.data : z)); setZoneAssignDriver(''); toast.success('Driver assigned to zone') }
+      else toast.error(data.message || 'Failed')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleZoneRemoveDriver = async (zoneId, driverId) => {
+    try {
+      const res = await fetch(`/api/zones/${zoneId}/remove-driver`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ driverId })
+      })
+      const data = await res.json()
+      if (data.success) { setSelectedZone(data.data); setZones(prev => prev.map(z => z._id === zoneId ? data.data : z)); toast.success('Driver removed from zone') }
+      else toast.error(data.message || 'Failed')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleZoneAssignVehicle = async (zoneId) => {
+    if (!zoneAssignVehicle) return
+    try {
+      const res = await fetch(`/api/zones/${zoneId}/assign-vehicle`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ vehicleId: zoneAssignVehicle })
+      })
+      const data = await res.json()
+      if (data.success) { setSelectedZone(data.data); setZones(prev => prev.map(z => z._id === zoneId ? data.data : z)); setZoneAssignVehicle(''); toast.success('Vehicle assigned to zone') }
+      else toast.error(data.message || 'Failed')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleChangePassword = async () => {
+    if (!pwForm.current || !pwForm.newPass) { toast.error('Please fill all password fields'); return }
+    if (pwForm.newPass !== pwForm.confirm) { toast.error('New passwords do not match'); return }
+    if (pwForm.newPass.length < 6) { toast.error('Password must be at least 6 characters'); return }
+    try {
+      const res = await fetch(`/api/admin/users/${user?._id}/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.newPass })
+      })
+      const data = await res.json()
+      if (data.success) { toast.success('Password updated successfully'); setPwForm({ current: '', newPass: '', confirm: '' }) }
+      else toast.error(data.message || 'Failed to change password')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleUpdateProfile = async () => {
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(profileEditForm)
+      })
+      const data = await res.json()
+      if (data.success || res.ok) { toast.success('Profile updated'); setShowProfileEditModal(false) }
+      else toast.error(data.message || 'Failed to update profile')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleBulkEnroll = async () => {
+    if (!bulkData.trim()) { toast.error('No data entered'); return }
+    setBulkLoading(true)
+    setBulkResult(null)
+    try {
+      const lines = bulkData.trim().split('\n').filter(l => l.trim())
+      const drivers = lines.map(line => {
+        const [name, phone, email, password] = line.split(',').map(s => s.trim())
+        return { name, phone, email, password: password || 'WaidFleet@123' }
+      }).filter(d => d.name && d.phone)
+      
+      let enrolled = 0, failed = 0
+      for (const d of drivers) {
+        try {
+          const res = await fetch('/api/drivers/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+            body: JSON.stringify(d)
+          })
+          const data = await res.json()
+          if (data.success) enrolled++; else failed++
+        } catch { failed++ }
+      }
+      setBulkResult({ enrolled, failed, total: drivers.length })
+      if (enrolled > 0) { fetchAll(); toast.success(`${enrolled} drivers enrolled successfully`) }
+      if (failed > 0) toast.warning(`${failed} entries failed`)
+    } catch (e) { toast.error('Bulk enrollment failed') }
+    setBulkLoading(false)
+  }
+
+  const handleAssignDriverToVehicle = async () => {
+    if (!newAssignedDriver) { toast.error('Select a driver'); return }
+    try {
+      const res = await fetch(`/api/vehicles/${selectedVehicle._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ assignedDriver: newAssignedDriver })
+      })
+      const data = await res.json()
+      if (data.success || res.ok) {
+        const driver = drivers.find(d => d._id === newAssignedDriver)
+        setSelectedVehicle(prev => ({ ...prev, assignedDriver: driver }))
+        setVehicles(prev => prev.map(v => v._id === selectedVehicle._id ? { ...v, assignedDriver: driver } : v))
+        setReassigningDriver(false); setNewAssignedDriver('')
+        toast.success('Driver assigned to vehicle')
+      } else toast.error(data.message || 'Failed to assign driver')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const handleSendDriverAlert = async () => {
+    if (!alertMessage.trim()) { toast.error('Enter a message'); return }
+    try {
+      const res = await fetch('/api/notifications/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ driverId: selectedVehicle?.assignedDriver?._id, message: alertMessage, type: 'alert' })
+      })
+      const data = await res.json()
+      if (data.success || res.ok) { toast.success('Alert sent to driver'); setShowAlertForm(false); setAlertMessage('') }
+      else toast.error(data.message || 'Failed to send alert')
+    } catch (e) { toast.error('Network error') }
+  }
+
+  const exportDriversCSV = () => {
+    const rows = [
+      ['Name', 'Phone', 'Email', 'Status', 'License', 'Joined'],
+      ...drivers.map(d => [d.name, d.phone, d.email, d.isActive ? 'Active' : 'Inactive', d.licenseNumber || '', new Date(d.createdAt).toLocaleDateString()])
+    ]
+    downloadCSV('drivers_export.csv', rows)
+    toast.success('Driver list exported')
+  }
+
+  const exportBillsCSV = () => {
+    const rows = [
+      ['Bill #', 'Driver', 'Phone', 'Period Start', 'Period End', 'Amount', 'Status'],
+      ...bills.map(b => [b.billNumber, b.driverId?.name, b.driverId?.phone, new Date(b.periodStartDate).toLocaleDateString(), new Date(b.periodEndDate).toLocaleDateString(), b.finalAmount, b.billStatus])
+    ]
+    downloadCSV('payouts_export.csv', rows)
+    toast.success('Payout data exported')
+  }
+
+  const exportAuditCSV = () => {
+    const rows = [
+      ['Event', 'Module', 'Admin', 'Role', 'Date'],
+      ...auditLogs.map(l => [l.description, l.module, l.performedByName, l.performedByRole, new Date(l.createdAt).toLocaleDateString()])
+    ]
+    downloadCSV('audit_logs_export.csv', rows)
+    toast.success('Audit logs exported')
   }
 
   // Polling for live telemetry when tracking section is active
@@ -305,10 +704,11 @@ export function AdminPanel() {
       })
       const data = await res.json()
       if (data.success) {
+        toast.success('Driver registered successfully')
         fetchAll(); setShowDriverModal(false)
-      } else { alert(data.message) }
-    } catch (e) { console.error(e) }
-    finally { setLoading(false); fetchAll() }
+      } else { toast.error(data.message || 'Failed to register driver') }
+    } catch (e) { toast.error('Network error'); console.error(e) }
+    finally { setLoading(false) }
   }
 
   const handleCreateVehicle = async (e) => {
@@ -321,9 +721,9 @@ export function AdminPanel() {
       })
       const data = await res.json()
       if (data.success) {
-         fetchAll(); setShowVehicleAddModal(false)
-      }
-    } catch (e) { console.error(e) }
+         fetchAll(); setShowVehicleAddModal(false); toast.success('Vehicle added successfully')
+      } else { toast.error(data.message || 'Failed to add vehicle') }
+    } catch (e) { toast.error('Network error'); console.error(e) }
   }
 
   const handleReportAccident = async (e) => {
@@ -336,9 +736,9 @@ export function AdminPanel() {
       })
       const data = await res.json()
       if (data.success) {
-        fetchAll(); setShowAccidentModal(false); setSection(SECTION.INCIDENTS)
-      }
-    } catch (e) { console.error(e) }
+        fetchAll(); setShowAccidentModal(false); setSection(SECTION.INCIDENTS); toast.success('Incident reported')
+      } else { toast.error(data.message || 'Failed to report incident') }
+    } catch (e) { toast.error('Network error'); console.error(e) }
   }
 
   const filteredDrivers = drivers.filter(d =>
@@ -512,6 +912,7 @@ export function AdminPanel() {
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button onClick={() => setShowBulkModal(true)} className="secondary"><FileText size={18}/> Bulk Ops</button>
                   <button onClick={() => setShowDriverModal(true)}>+ Add Driver</button>
+                   <button className="secondary" onClick={exportDriversCSV}><Download size={18}/> Export</button>
                 </div>
               </div>
 
@@ -611,7 +1012,7 @@ export function AdminPanel() {
                       
                       <div style={{ marginTop: '1.5rem', display: 'flex', gap: '8px' }}>
                         <button onClick={() => { setSelectedVehicle(v); setShowVehicleModal(true); }} className="secondary" style={{ flex: 1, padding: '8px' }}><Car size={14}/> View Details</button>
-                        <button className="secondary" style={{ flex: 1, padding: '8px' }}><MapPin size={14}/> Track</button>
+                        <button className="secondary" style={{ flex: 1, padding: '8px' }} onClick={() => { setSection(SECTION.TRACKING) }}><MapPin size={14}/> Track</button>
                       </div>
                    </div>
                 ))}
@@ -628,8 +1029,8 @@ export function AdminPanel() {
                   <p style={{ color: 'var(--text-secondary)' }}>System security, administrative access, and activity monitoring.</p>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
-                  <button className="secondary"><Activity size={18}/> Activity Log</button>
-                  <button className="secondary"><Clock size={18}/> Active Sessions</button>
+                  <button className="secondary" onClick={() => { setSection(SECTION.SETTINGS); setActiveSettingTab(SETTING_TAB.AUDIT); fetchAuditLogs(); }}><Activity size={18}/> Activity Log</button>
+                  <button className="secondary" onClick={() => toast.info('Session management is available under Platform Settings.')}><Clock size={18}/> Active Sessions</button>
                 </div>
               </div>
 
@@ -798,9 +1199,30 @@ export function AdminPanel() {
                   ))}
                </div>
 
-               <div className="glass-card" style={{ padding: '2rem' }}>
-                  <h3 className="outfit" style={{ marginBottom: '1.5rem' }}>Transaction History</h3>
-                  <p style={{ color: 'var(--text-muted)' }}>Connect to Payment Provider for live ledger sync.</p>
+               <div className="glass-card" style={{ padding: '0', overflow: 'hidden' }}>
+                  <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 className="outfit" style={{ margin: 0 }}>Transaction History</h3>
+                    <button className="secondary" style={{ padding: '6px 14px', fontSize: '0.8rem' }} onClick={() => setSection(SECTION.BILLING)}><FileText size={14}/> Full Report</button>
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead style={{ background: 'rgba(255,255,255,0.02)' }}><tr>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>BILL</th>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>DRIVER</th>
+                      <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>AMOUNT</th>
+                      <th style={{ textAlign: 'center', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>STATUS</th>
+                    </tr></thead>
+                    <tbody>
+                      {bills.slice(0,10).map(b => (
+                        <tr key={b._id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '1rem', fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem' }}>#{b.billNumber}</td>
+                          <td style={{ padding: '1rem' }}><div style={{ fontWeight: 600 }}>{b.driverId?.name}</div><div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{b.driverId?.phone}</div></td>
+                          <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 800 }}>₹{(b.finalAmount || 0).toLocaleString()}</td>
+                          <td style={{ padding: '1rem', textAlign: 'center' }}><span className={`badge ${b.billStatus === 'paid' ? 'success' : b.isOverdue ? 'danger' : 'warning'}`}>{b.isOverdue ? 'OVERDUE' : (b.billStatus || '').toUpperCase()}</span></td>
+                        </tr>
+                      ))}
+                      {bills.length === 0 && <tr><td colSpan="4" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No transactions found.</td></tr>}
+                    </tbody>
+                  </table>
                </div>
             </div>
           )}
@@ -863,14 +1285,17 @@ export function AdminPanel() {
                 </div>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <button className="secondary" onClick={async () => {
-                    const res = await fetch('/api/billing/generate-weekly', { method: 'POST', headers: { Authorization: `Bearer ${token()}` } })
-                    const data = await res.json()
-                    alert(data.message); fetchBills()
+                    try {
+                      const res = await fetch('/api/billing/generate-weekly', { method: 'POST', headers: { Authorization: `Bearer ${token()}` } })
+                      const data = await res.json()
+                      if (data.success) { toast.success(data.message || 'Bills generated'); fetchBills() }
+                      else toast.error(data.message || 'Failed to generate bills')
+                    } catch (e) { toast.error('Network error') }
                   }}>
                     <Zap size={16}/> Auto-Generate Bills
                   </button>
-                  <button onClick={() => alert('Payout Export Sequence Initialized...')}>
-                    <DollarSign size={16}/> Extract Payouts
+                  <button onClick={exportBillsCSV}>
+                    <Download size={16}/> Extract Payouts
                   </button>
                 </div>
               </div>
@@ -955,7 +1380,7 @@ export function AdminPanel() {
                         </td>
                         <td style={{ padding: '1.2rem', textAlign: 'right' }}>
                           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                            <button className="glass-btn icon" title="View Statement"><FileText size={14}/></button>
+                            <button className="glass-btn icon" title="View Statement" onClick={() => { setSelectedBill(b); setShowBillDetailModal(true) }}><FileText size={14}/></button>
                             {b.billStatus !== 'paid' && (
                               <button className="primary" style={{ padding: '6px 12px', fontSize: '0.7rem' }} onClick={async () => {
                                 await fetch(`/api/billing/${b._id}/pay`, { method: 'PUT', headers: { Authorization: `Bearer ${token()}` } })
@@ -1016,7 +1441,7 @@ export function AdminPanel() {
                       <h4 className="outfit" style={{ margin: 0 }}>Service Records</h4>
                       <div style={{ position: 'relative' }}>
                         <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.4 }} />
-                        <input className="secondary" placeholder="Search plates..." style={{ paddingLeft: '35px', py: '6px', width: '200px', fontSize: '0.8rem' }} />
+                        <input className="secondary" placeholder="Search plates..." value={serviceSearch} onChange={e => setServiceSearch(e.target.value)} style={{ paddingLeft: '35px', width: '200px', fontSize: '0.8rem' }} />
                       </div>
                     </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1030,7 +1455,7 @@ export function AdminPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {vehicles.slice(0, 10).map(v => (
+                        {vehicles.filter(v => !serviceSearch || v.plateNumber?.toLowerCase().includes(serviceSearch.toLowerCase()) || v.name?.toLowerCase().includes(serviceSearch.toLowerCase())).slice(0, 10).map(v => (
                           <tr key={v._id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                             <td style={{ padding: '1.2rem' }}>
                               <div style={{ fontWeight: 800 }}>{v.plateNumber}</div>
@@ -1180,8 +1605,8 @@ export function AdminPanel() {
                            </div>
                            <p style={{ color: 'var(--text-muted)', margin: 0 }}>{user?.email}</p>
                            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-                              <button className="secondary small">Update Avatar</button>
-                              <button className="secondary small">Edit Basic Info</button>
+                              <button className="secondary small" onClick={() => toast.info('Avatar upload will be available in the next update.')}>Update Avatar</button>
+                              <button className="secondary small" onClick={() => { setProfileEditForm({ name: user?.name || '', phone: user?.phone || '' }); setShowProfileEditModal(true); }}>Edit Basic Info</button>
                            </div>
                         </div>
                       </div>
@@ -1211,18 +1636,18 @@ export function AdminPanel() {
                                <h4 style={{ margin: '0 0 0.5rem 0' }}>Two-Factor Authentication (2FA)</h4>
                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>Protect your account with an additional security layer using TOTP.</p>
                             </div>
-                            <button className="secondary small">Enable 2FA</button>
+                            <button className="secondary small" onClick={() => setShow2FAModal(true)}>Enable 2FA</button>
                          </div>
                       </div>
                       <div className="glass-card">
                          <h4 style={{ margin: '0 0 1.5rem 0' }}>Password Management</h4>
                          <div style={{ display: 'grid', gap: '1rem' }}>
-                            <input type="password" placeholder="Current Password" />
+                             <input type="password" placeholder="Current Password" value={pwForm.current} onChange={e => setPwForm({...pwForm, current: e.target.value})} />
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                               <input type="password" placeholder="New Password" />
-                               <input type="password" placeholder="Confirm New Password" />
+                                <input type="password" placeholder="New Password" value={pwForm.newPass} onChange={e => setPwForm({...pwForm, newPass: e.target.value})} />
+                                <input type="password" placeholder="Confirm New Password" value={pwForm.confirm} onChange={e => setPwForm({...pwForm, confirm: e.target.value})} />
                             </div>
-                            <button style={{ alignSelf: 'flex-start', marginTop: '1rem' }}>Update Password Protocol</button>
+                             <button onClick={handleChangePassword} style={{ alignSelf: 'flex-start', marginTop: '1rem' }}>Update Password</button>
                          </div>
                       </div>
                       <div className="glass-card" style={{ border: '1px solid var(--danger-subtle)' }}>
@@ -1278,8 +1703,8 @@ export function AdminPanel() {
                                      </div>
                                   </td>
                                   <td style={{ padding: '1rem', textAlign: 'right' }}>
-                                     <button className="secondary small" style={{ marginRight: '8px' }}>Edit</button>
-                                     <button className="secondary small" style={{ color: 'var(--danger)' }}>Revoke</button>
+                                     <button className="secondary small" style={{ marginRight: '8px' }} onClick={() => { setEditingSubAdmin(admin); setSaForm({ name: admin.name, email: admin.email, password: '', phone: admin.phone || '', designation: admin.designation || '', permissions: admin.permissions || [], isTemporary: admin.isTemporary || false, accessStartsAt: admin.accessStartsAt || '', accessExpiresAt: admin.accessExpiresAt || '' }); setShowCreateModal(true); }}>Edit</button>
+                                     <button className="secondary small" style={{ color: 'var(--danger)' }} onClick={() => handleRevokeSubAdmin(admin._id)}>Revoke</button>
                                   </td>
                                </tr>
                              ))}
@@ -1447,9 +1872,9 @@ export function AdminPanel() {
                        <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '1rem' }}>
                           <div style={{ flex: 1, position: 'relative' }}>
                              <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}/>
-                             <input placeholder="Search audit trail..." style={{ width: '100%', padding: '8px 12px 8px 36px', fontSize: '0.85rem' }} />
+                             <input placeholder="Search audit trail..." value={auditSearch} onChange={e => setAuditSearch(e.target.value)} style={{ width: '100%', padding: '8px 12px 8px 36px', fontSize: '0.85rem' }} />
                           </div>
-                          <button className="secondary small">Export CSV</button>
+                          <button className="secondary small" onClick={exportAuditCSV}><Download size={14}/> Export CSV</button>
                        </div>
                        <div className="custom-scrollbar" style={{ maxHeight: '500px', overflowY: 'auto' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1462,7 +1887,7 @@ export function AdminPanel() {
                                 </tr>
                              </thead>
                              <tbody>
-                                {auditLogs.length > 0 ? auditLogs.map((log, i) => (
+                                {auditLogs.filter(l => !auditSearch || l.description?.toLowerCase().includes(auditSearch.toLowerCase()) || l.module?.toLowerCase().includes(auditSearch.toLowerCase()) || l.performedByName?.toLowerCase().includes(auditSearch.toLowerCase())).map((log, i) => (
                                   <tr key={i} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                                      <td style={{ padding: '1rem' }}>
                                         <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{log.description}</div>
@@ -1480,10 +1905,9 @@ export function AdminPanel() {
                                         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{new Date(log.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                                      </td>
                                   </tr>
-                                )) : (
-                                  <tr>
-                                    <td colSpan="4" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>No audit logs discovered in the intelligence terminal.</td>
-                                  </tr>
+                                ))}
+                                {auditLogs.length === 0 && (
+                                  <tr><td colSpan="4" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>No audit logs found.</td></tr>
                                 )}
                              </tbody>
                           </table>
@@ -1641,8 +2065,182 @@ export function AdminPanel() {
             </div>
           )}
 
+
+          {/* ════ SECTION: TRIP MANAGEMENT ════ */}
+          {section === SECTION.TRIPS && (
+            <div className="animate-fade-in">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '3rem' }}>
+                <div>
+                  <h2 className="outfit" style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>Trip Management</h2>
+                  <p style={{ color: 'var(--text-secondary)' }}>Create, assign, and track all fleet trips in real time.</p>
+                </div>
+                <button onClick={() => setShowTripModal(true)}><Plus size={18}/> Create Trip</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+                {[
+                  { label: 'Total Trips', value: tripStats?.totalTrips ?? trips.length, color: 'var(--primary-accent)' },
+                  { label: 'In Progress', value: tripStats?.byStatus?.in_progress ?? trips.filter(t => t.status === 'in_progress').length, color: 'var(--warning)' },
+                  { label: 'Completed', value: tripStats?.byStatus?.completed ?? trips.filter(t => t.status === 'completed').length, color: 'var(--success)' },
+                  { label: 'Total Revenue', value: `₹${((tripStats?.totalRevenue || 0)).toLocaleString()}`, color: 'var(--info)' },
+                ].map((s, i) => (
+                  <div key={i} className="glass-card" style={{ padding: '1.5rem' }}>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', margin: '0 0 8px' }}>{s.label}</p>
+                    <h3 className="outfit" style={{ margin: 0, fontSize: '2rem', color: s.color }}>{s.value}</h3>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '1rem' }}>
+                {['all', 'requested', 'assigned', 'in_progress', 'completed', 'cancelled'].map(f => (
+                  <button key={f} onClick={() => setTripFilter(f)} style={{ border: 'none', padding: '6px 14px', borderRadius: '100px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, textTransform: 'capitalize', background: tripFilter === f ? 'var(--primary-accent)' : 'rgba(255,255,255,0.05)', color: tripFilter === f ? 'white' : 'var(--text-muted)', transition: '0.2s' }}>
+                    {f === 'all' ? 'All' : f.replace('_', ' ')}
+                  </button>
+                ))}
+              </div>
+              <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>TRIP ID</th>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>DRIVER</th>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>PICKUP</th>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>DROP</th>
+                      <th style={{ textAlign: 'center', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>STATUS</th>
+                      <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>FARE</th>
+                      <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trips.map(t => {
+                      const statusColor = { requested: '#3b82f6', assigned: '#8b5cf6', in_progress: '#f59e0b', completed: '#10b981', cancelled: '#ef4444' }[t.status] || 'var(--text-muted)'
+                      return (
+                        <tr key={t._id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '1rem', fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary-accent)' }}>{String(t._id).slice(-6).toUpperCase()}</td>
+                          <td style={{ padding: '1rem' }}><div style={{ fontWeight: 600 }}>{t.driverId?.name || 'Unassigned'}</div><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t.driverId?.phone}</div></td>
+                          <td style={{ padding: '1rem', fontSize: '0.85rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.pickupLocation?.address || '-'}</td>
+                          <td style={{ padding: '1rem', fontSize: '0.85rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.dropLocation?.address || '-'}</td>
+                          <td style={{ padding: '1rem', textAlign: 'center' }}>
+                            <select value={t.status} onChange={e => handleUpdateTripStatus(t._id, e.target.value)} style={{ padding: '4px 8px', background: 'var(--bg-elevated)', border: `1px solid ${statusColor}`, borderRadius: '6px', color: statusColor, fontWeight: 700, fontSize: '0.7rem', cursor: 'pointer' }}>
+                              {['requested','assigned','in_progress','completed','cancelled'].map(s => <option key={s} value={s}>{s.replace('_',' ').toUpperCase()}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 800 }}>₹{(t.fare || 0).toLocaleString()}</td>
+                          <td style={{ padding: '1rem', textAlign: 'right' }}>
+                            <button className="secondary" style={{ padding: '4px 10px', fontSize: '0.75rem', color: 'var(--danger)' }} onClick={() => handleDeleteTrip(t._id)}><Trash2 size={12}/></button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {trips.length === 0 && <tr><td colSpan="7" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}><Route size={40} style={{ marginBottom: '1rem', opacity: 0.2 }}/><p>No trips found for this filter.</p></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ════ SECTION: FUEL MANAGEMENT ════ */}
+          {section === SECTION.FUEL && (
+            <div className="animate-fade-in">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '3rem' }}>
+                <div>
+                  <h2 className="outfit" style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>Fuel Management</h2>
+                  <p style={{ color: 'var(--text-secondary)' }}>Track fuel consumption, costs, and fleet efficiency.</p>
+                </div>
+                <button onClick={() => setShowFuelModal(true)}><Plus size={18}/> Add Fuel Log</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+                {[
+                  { label: 'Total Fuel Cost', value: `₹${((fuelStats?.totalCost || 0)).toLocaleString()}`, color: 'var(--danger)' },
+                  { label: 'Total Liters', value: `${(fuelStats?.totalLiters || 0).toFixed(1)} L`, color: 'var(--info)' },
+                  { label: 'Avg Efficiency', value: `${(fuelStats?.avgEfficiency || 0).toFixed(1)} km/L`, color: 'var(--success)' },
+                  { label: 'Log Entries', value: fuelLogs.length, color: 'var(--primary-accent)' },
+                ].map((s, i) => (
+                  <div key={i} className="glass-card" style={{ padding: '1.5rem' }}>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', margin: '0 0 8px' }}>{s.label}</p>
+                    <h3 className="outfit" style={{ margin: 0, fontSize: '2rem', color: s.color }}>{s.value}</h3>
+                  </div>
+                ))}
+              </div>
+              <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>VEHICLE</th>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>DRIVER</th>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>DATE</th>
+                      <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>STATION</th>
+                      <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>AMOUNT (L)</th>
+                      <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>COST (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fuelLogs.map(fl => (
+                      <tr key={fl._id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '1rem' }}><div style={{ fontWeight: 700 }}>{fl.vehicleId?.plateNumber || '-'}</div><div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{fl.vehicleId?.name}</div></td>
+                        <td style={{ padding: '1rem', fontSize: '0.85rem' }}>{fl.driverId?.name || '-'}</td>
+                        <td style={{ padding: '1rem', fontSize: '0.85rem' }}>{new Date(fl.date).toLocaleDateString()}</td>
+                        <td style={{ padding: '1rem', fontSize: '0.85rem' }}>{fl.station || '-'}</td>
+                        <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 700 }}>{fl.fuelAmount} L</td>
+                        <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 800, color: 'var(--danger)' }}>₹{(fl.fuelCost || 0).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    {fuelLogs.length === 0 && <tr><td colSpan="6" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}><Fuel size={40} style={{ marginBottom: '1rem', opacity: 0.2 }}/><p>No fuel logs found. Add your first entry.</p></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ════ SECTION: ZONE MANAGEMENT ════ */}
+          {section === SECTION.ZONES && (
+            <div className="animate-fade-in">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '3rem' }}>
+                <div>
+                  <h2 className="outfit" style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>Zone Management</h2>
+                  <p style={{ color: 'var(--text-secondary)' }}>Create city-wise zones and assign fleet assets to regions.</p>
+                </div>
+                <button onClick={() => setShowZoneModal(true)}><Plus size={18}/> Create Zone</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
+                {zones.map(z => (
+                  <div key={z._id} className="glass-card animate-fade-in" style={{ padding: '1.5rem', borderLeft: `4px solid ${z.color || '#6366f1'}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                      <div>
+                        <h3 style={{ margin: '0 0 4px' }}>{z.name}</h3>
+                        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>{z.city}{z.state ? `, ${z.state}` : ''}</p>
+                      </div>
+                      <span style={{ padding: '3px 10px', borderRadius: '100px', fontSize: '0.7rem', fontWeight: 800, background: z.isActive ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: z.isActive ? 'var(--success)' : 'var(--danger)' }}>
+                        {z.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    {z.description && <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1rem' }}>{z.description}</p>}
+                    <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem' }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary-accent)' }}>{z.assignedDrivers?.length || 0}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Drivers</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--info)' }}>{z.assignedVehicles?.length || 0}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Vehicles</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button className="secondary" style={{ flex: 1, padding: '8px', fontSize: '0.8rem' }} onClick={() => { setSelectedZone(z); setShowZoneDetailModal(true); }}><Eye size={14}/> Details</button>
+                      <button className="secondary" style={{ padding: '8px 12px', fontSize: '0.8rem', color: 'var(--danger)' }} onClick={() => handleDeleteZone(z._id)}><Trash2 size={14}/></button>
+                    </div>
+                  </div>
+                ))}
+                {zones.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '4rem', color: 'var(--text-muted)' }}>
+                    <Globe size={48} style={{ marginBottom: '1rem', opacity: 0.2 }}/>
+                    <p>No zones created yet. Click "Create Zone" to get started.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Fallback for other sections */}
-          {![SECTION.OVERVIEW, SECTION.DRIVERS, SECTION.VEHICLES, SECTION.ACCESS, SECTION.ANALYTICS, SECTION.FINANCIALS, SECTION.SERVICES, SECTION.PERFORMANCE, SECTION.SETTINGS, SECTION.INCIDENTS, SECTION.TRACKING, SECTION.BILLING].includes(section) && (
+          {![SECTION.OVERVIEW, SECTION.DRIVERS, SECTION.VEHICLES, SECTION.ACCESS, SECTION.ANALYTICS, SECTION.FINANCIALS, SECTION.SERVICES, SECTION.PERFORMANCE, SECTION.SETTINGS, SECTION.INCIDENTS, SECTION.TRACKING, SECTION.BILLING, SECTION.TRIPS, SECTION.FUEL, SECTION.ZONES].includes(section) && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', textAlign: 'center' }}>
                <div style={{ background: 'var(--bg-elevated)', padding: '2.5rem', borderRadius: '24px', border: '1px solid var(--border-subtle)' }}>
                  <Settings size={48} className="animate-spin" style={{ animationDuration: '4s', color: 'var(--primary-accent)', marginBottom: '1.5rem' }} />
@@ -1668,7 +2266,7 @@ export function AdminPanel() {
                    </div>
                    <p style={{ color: 'var(--text-muted)', margin: 0 }}>{selectedVehicle.type} Utility • Registered: {selectedVehicle.registrationNumber}</p>
                  </div>
-                 <button onClick={() => setShowVehicleModal(false)} className="secondary" style={{ borderRadius: '50%', width: '40px', height: '40px', padding: 0 }}>X</button>
+                 <button onClick={() => { setShowVehicleModal(false); setReassigningDriver(false); setNewAssignedDriver(''); setShowAlertForm(false); setAlertMessage(''); }} className="secondary" style={{ borderRadius: '50%', width: '40px', height: '40px', padding: 0 }}>X</button>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
@@ -1688,16 +2286,42 @@ export function AdminPanel() {
                                <span style={{ fontSize: '0.7rem', padding: '2px 8px', background: 'rgba(16,185,129,0.1)', color: 'var(--success)', borderRadius: '4px', fontWeight: 800 }}>ON DUTY</span>
                             </div>
                          </div>
-                         <div style={{ display: 'flex', gap: '8px' }}>
-                            <button className="secondary" style={{ flex: 1, fontSize: '0.8rem' }}><FileText size={14}/> View Profile</button>
-                            <button className="secondary" style={{ flex: 1, fontSize: '0.8rem', color: 'var(--danger)' }}>Reassign</button>
-                         </div>
+                         {reassigningDriver ? (
+                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                             <select style={{ padding: '8px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white', fontSize: '0.85rem', width: '100%' }} value={newAssignedDriver} onChange={e => setNewAssignedDriver(e.target.value)}>
+                               <option value="">Select new driver...</option>
+                               {drivers.map(d => <option key={d._id} value={d._id}>{d.name} ({d.phone})</option>)}
+                             </select>
+                             <div style={{ display: 'flex', gap: '8px' }}>
+                               <button style={{ flex: 1, fontSize: '0.8rem' }} onClick={handleAssignDriverToVehicle}>Confirm</button>
+                               <button className="secondary" style={{ flex: 1, fontSize: '0.8rem' }} onClick={() => { setReassigningDriver(false); setNewAssignedDriver('') }}>Cancel</button>
+                             </div>
+                           </div>
+                         ) : (
+                           <div style={{ display: 'flex', gap: '8px' }}>
+                             <button className="secondary" style={{ flex: 1, fontSize: '0.8rem' }} onClick={() => { setShowVehicleModal(false); setSection(SECTION.DRIVERS); setSearch(selectedVehicle.assignedDriver?.name || ''); }}><FileText size={14}/> View Profile</button>
+                             <button className="secondary" style={{ flex: 1, fontSize: '0.8rem', color: 'var(--danger)' }} onClick={() => setReassigningDriver(true)}>Reassign</button>
+                           </div>
+                         )}
                       </div>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '1rem' }}>
                          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}><UserX size={24} color="var(--text-muted)"/></div>
                          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>No driver currently assigned to this vehicle.</p>
-                         <button style={{ width: '100%' }}>+ Assign Driver</button>
+                           {reassigningDriver ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <select style={{ padding: '8px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white', fontSize: '0.85rem' }} value={newAssignedDriver} onChange={e => setNewAssignedDriver(e.target.value)}>
+                                <option value="">Select driver...</option>
+                                {drivers.map(d => <option key={d._id} value={d._id}>{d.name} ({d.phone})</option>)}
+                              </select>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button style={{ flex: 1, fontSize: '0.8rem' }} onClick={handleAssignDriverToVehicle}>Confirm Assign</button>
+                                <button className="secondary" style={{ flex: 1, fontSize: '0.8rem' }} onClick={() => { setReassigningDriver(false); setNewAssignedDriver('') }}>Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button style={{ width: '100%' }} onClick={() => setReassigningDriver(true)}>+ Assign Driver</button>
+                          )}
                       </div>
                     )}
                  </div>
@@ -1726,7 +2350,17 @@ export function AdminPanel() {
                        </div>
                     </div>
 
-                    <button className="secondary" style={{ width: '100%' }}><Bell size={16}/> Send Alert to Driver</button>
+                      {showAlertForm ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <textarea placeholder="Message to driver..." value={alertMessage} onChange={e => setAlertMessage(e.target.value)} style={{ padding: '10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white', fontSize: '0.85rem', resize: 'vertical', minHeight: '80px', width: '100%', boxSizing: 'border-box' }} />
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button style={{ flex: 1, fontSize: '0.8rem' }} onClick={handleSendDriverAlert}><Send size={14}/> Send Alert</button>
+                            <button className="secondary" style={{ flex: 1, fontSize: '0.8rem' }} onClick={() => { setShowAlertForm(false); setAlertMessage('') }}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button className="secondary" style={{ width: '100%' }} onClick={() => setShowAlertForm(true)} disabled={!selectedVehicle?.assignedDriver}><Bell size={16}/> Send Alert to Driver</button>
+                      )}
                  </div>
               </div>
 
@@ -1945,8 +2579,32 @@ export function AdminPanel() {
 
         {/* Modal: Bulk Operations */}
         {showBulkModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-            {/* ... existng bulk modal content ... */}
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '640px', border: '1px solid var(--border-subtle)', borderRadius: '32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <div><h2 className="outfit" style={{ margin: 0 }}>Bulk Driver Enrollment</h2><p style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>Paste CSV data: Name, Phone, Email, Password (one per line)</p></div>
+                <button onClick={() => { setShowBulkModal(false); setBulkResult(null); setBulkData('') }} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button>
+              </div>
+              <div style={{ background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '12px', padding: '1rem', marginBottom: '1.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                <strong>Format:</strong> John Doe, 9999999999, john@email.com, Password123<br/>
+                One driver per line. Password is optional (defaults to WaidFleet@123).
+              </div>
+              <textarea
+                value={bulkData}
+                onChange={e => setBulkData(e.target.value)}
+                placeholder={"John Doe, 9999999999, john@example.com\nJane Smith, 8888888888, jane@example.com, SecurePass1"}
+                style={{ width: '100%', minHeight: '180px', padding: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', borderRadius: '12px', color: 'white', fontSize: '0.85rem', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
+              />
+              {bulkResult && (
+                <div style={{ margin: '1rem 0', padding: '1rem', borderRadius: '12px', background: bulkResult.failed > 0 ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)', border: `1px solid ${bulkResult.failed > 0 ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.3)'}` }}>
+                  <p style={{ margin: 0, fontWeight: 700 }}>{bulkResult.enrolled} of {bulkResult.total} drivers enrolled successfully{bulkResult.failed > 0 ? ` (${bulkResult.failed} failed)` : '.'}</p>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+                <button onClick={handleBulkEnroll} disabled={bulkLoading} style={{ flex: 1 }}>{bulkLoading ? 'Enrolling...' : 'Enroll Drivers'}</button>
+                <button onClick={() => { setShowBulkModal(false); setBulkResult(null); setBulkData('') }} className="secondary" style={{ flex: 1 }}>Cancel</button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1954,7 +2612,7 @@ export function AdminPanel() {
         {showCreateModal && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
             <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '95%', maxWidth: '700px', border: '1px solid var(--primary-accent)', borderRadius: '32px', maxHeight: '90vh', overflowY: 'auto' }}>
-               <h2 className="outfit" style={{ marginTop: 0 }}>Authorize Sub-Admin</h2>
+               <h2 className="outfit" style={{ marginTop: 0 }}>{editingSubAdmin ? 'Edit Sub-Admin' : 'Authorize Sub-Admin'}</h2>
                <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>Grant specific permissions and define access timeframe for new administrative personnel.</p>
                
                <form onSubmit={handleCreateSubAdmin} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
@@ -2027,12 +2685,243 @@ export function AdminPanel() {
                      <button type="submit" disabled={saLoading} style={{ flex: 1 }}>
                         {saLoading ? 'Synchronizing Intelligence...' : 'Authorize Personnel'}
                      </button>
-                     <button type="button" onClick={() => setShowCreateModal(false)} className="secondary" style={{ flex: 1 }}>Revoke Invitation</button>
+                     <button type="button" onClick={() => { setShowCreateModal(false); setEditingSubAdmin(null); }} className="secondary" style={{ flex: 1 }}>Cancel</button>
                   </div>
                </form>
             </div>
           </div>
         )}
+
+        {/* Modal: Create Trip */}
+        {showTripModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '600px', border: '1px solid var(--primary-accent)', borderRadius: '32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <h2 className="outfit" style={{ margin: 0 }}>Create Trip</h2>
+                <button onClick={() => setShowTripModal(false)} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button>
+              </div>
+              <form onSubmit={handleCreateTrip} style={{ display: 'grid', gap: '1.2rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Assign Driver</label>
+                    <select value={tripForm.driverId} onChange={e => setTripForm({...tripForm, driverId: e.target.value})} style={{ width: '100%', padding: '10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white' }}>
+                      <option value="">Auto-assign</option>
+                      {drivers.filter(d => d.isActive).map(d => <option key={d._id} value={d._id}>{d.name} ({d.phone})</option>)}
+                    </select>
+                  </div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Assign Vehicle</label>
+                    <select value={tripForm.vehicleId} onChange={e => setTripForm({...tripForm, vehicleId: e.target.value})} style={{ width: '100%', padding: '10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white' }}>
+                      <option value="">Select vehicle</option>
+                      {vehicles.filter(v => v.status === 'active').map(v => <option key={v._id} value={v._id}>{v.plateNumber} - {v.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Pickup Address</label><input required value={tripForm.pickupAddress} onChange={e => setTripForm({...tripForm, pickupAddress: e.target.value})} placeholder="Enter pickup location" /></div>
+                <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Drop Address</label><input required value={tripForm.dropAddress} onChange={e => setTripForm({...tripForm, dropAddress: e.target.value})} placeholder="Enter drop location" /></div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Passenger Name</label><input value={tripForm.passengerName} onChange={e => setTripForm({...tripForm, passengerName: e.target.value})} placeholder="Passenger" /></div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Passenger Phone</label><input value={tripForm.passengerPhone} onChange={e => setTripForm({...tripForm, passengerPhone: e.target.value})} placeholder="Phone" /></div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fare (₹)</label><input type="number" value={tripForm.fare} onChange={e => setTripForm({...tripForm, fare: e.target.value})} placeholder="0" /></div>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                  <button type="submit" style={{ flex: 1 }}>Create Trip</button>
+                  <button type="button" onClick={() => setShowTripModal(false)} className="secondary" style={{ flex: 1 }}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Add Fuel Log */}
+        {showFuelModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '560px', border: '1px solid var(--primary-accent)', borderRadius: '32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <h2 className="outfit" style={{ margin: 0 }}>Add Fuel Log</h2>
+                <button onClick={() => setShowFuelModal(false)} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button>
+              </div>
+              <form onSubmit={handleAddFuelLog} style={{ display: 'grid', gap: '1.2rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Vehicle *</label>
+                    <select required value={fuelForm.vehicleId} onChange={e => setFuelForm({...fuelForm, vehicleId: e.target.value})} style={{ width: '100%', padding: '10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white' }}>
+                      <option value="">Select vehicle</option>
+                      {vehicles.map(v => <option key={v._id} value={v._id}>{v.plateNumber} - {v.name}</option>)}
+                    </select>
+                  </div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Driver</label>
+                    <select value={fuelForm.driverId} onChange={e => setFuelForm({...fuelForm, driverId: e.target.value})} style={{ width: '100%', padding: '10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white' }}>
+                      <option value="">Select driver</option>
+                      {drivers.map(d => <option key={d._id} value={d._id}>{d.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Amount (L) *</label><input required type="number" step="0.1" value={fuelForm.fuelAmount} onChange={e => setFuelForm({...fuelForm, fuelAmount: e.target.value})} placeholder="0.0" /></div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Cost (₹) *</label><input required type="number" value={fuelForm.fuelCost} onChange={e => setFuelForm({...fuelForm, fuelCost: e.target.value})} placeholder="0" /></div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Odometer</label><input type="number" value={fuelForm.odometer} onChange={e => setFuelForm({...fuelForm, odometer: e.target.value})} placeholder="km" /></div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fuel Type</label>
+                    <select value={fuelForm.fuelType} onChange={e => setFuelForm({...fuelForm, fuelType: e.target.value})} style={{ width: '100%', padding: '10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white' }}>
+                      <option value="petrol">Petrol</option><option value="diesel">Diesel</option><option value="cng">CNG</option><option value="electric">Electric</option>
+                    </select>
+                  </div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Station Name</label><input value={fuelForm.station} onChange={e => setFuelForm({...fuelForm, station: e.target.value})} placeholder="Fuel station" /></div>
+                </div>
+                <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Notes</label><input value={fuelForm.notes} onChange={e => setFuelForm({...fuelForm, notes: e.target.value})} placeholder="Optional notes" /></div>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                  <button type="submit" style={{ flex: 1 }}>Save Fuel Log</button>
+                  <button type="button" onClick={() => setShowFuelModal(false)} className="secondary" style={{ flex: 1 }}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Create Zone */}
+        {showZoneModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '480px', border: '1px solid var(--primary-accent)', borderRadius: '32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <h2 className="outfit" style={{ margin: 0 }}>Create Zone</h2>
+                <button onClick={() => setShowZoneModal(false)} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button>
+              </div>
+              <form onSubmit={handleCreateZone} style={{ display: 'grid', gap: '1.2rem' }}>
+                <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Zone Name *</label><input required value={zoneForm.name} onChange={e => setZoneForm({...zoneForm, name: e.target.value})} placeholder="e.g. North Mumbai" /></div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>City *</label><input required value={zoneForm.city} onChange={e => setZoneForm({...zoneForm, city: e.target.value})} placeholder="Mumbai" /></div>
+                  <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>State</label><input value={zoneForm.state} onChange={e => setZoneForm({...zoneForm, state: e.target.value})} placeholder="Maharashtra" /></div>
+                </div>
+                <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Description</label><textarea value={zoneForm.description} onChange={e => setZoneForm({...zoneForm, description: e.target.value})} placeholder="Zone description..." style={{ width: '100%', padding: '10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white', resize: 'vertical', minHeight: '80px', boxSizing: 'border-box' }} /></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Zone Color</label>
+                  <input type="color" value={zoneForm.color} onChange={e => setZoneForm({...zoneForm, color: e.target.value})} style={{ width: '48px', height: '36px', border: 'none', background: 'none', cursor: 'pointer' }} />
+                  <span style={{ width: '20px', height: '20px', borderRadius: '50%', background: zoneForm.color, display: 'inline-block', border: '2px solid white' }}></span>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                  <button type="submit" style={{ flex: 1 }}>Create Zone</button>
+                  <button type="button" onClick={() => setShowZoneModal(false)} className="secondary" style={{ flex: 1 }}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Zone Details */}
+        {showZoneDetailModal && selectedZone && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '720px', border: `1px solid ${selectedZone.color || 'var(--primary-accent)'}`, borderRadius: '32px', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <div><h2 className="outfit" style={{ margin: '0 0 4px' }}>{selectedZone.name}</h2><p style={{ color: 'var(--text-muted)', margin: 0 }}>{selectedZone.city}{selectedZone.state ? `, ${selectedZone.state}` : ''}</p></div>
+                <button onClick={() => setShowZoneDetailModal(false)} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                <div>
+                  <h4 className="outfit" style={{ marginBottom: '1rem', color: 'var(--primary-accent)' }}>Assigned Drivers ({selectedZone.assignedDrivers?.length || 0})</h4>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '1rem' }}>
+                    <select value={zoneAssignDriver} onChange={e => setZoneAssignDriver(e.target.value)} style={{ flex: 1, padding: '8px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white', fontSize: '0.85rem' }}>
+                      <option value="">Select driver to add</option>
+                      {drivers.map(d => <option key={d._id} value={d._id}>{d.name}</option>)}
+                    </select>
+                    <button style={{ padding: '8px 14px', fontSize: '0.8rem' }} onClick={() => handleZoneAssignDriver(selectedZone._id)}>Add</button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedZone.assignedDrivers?.map(d => (
+                      <div key={d._id || d} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{d.name || d}</span>
+                        <button className="secondary" style={{ padding: '3px 8px', fontSize: '0.7rem', color: 'var(--danger)' }} onClick={() => handleZoneRemoveDriver(selectedZone._id, d._id || d)}>Remove</button>
+                      </div>
+                    ))}
+                    {!selectedZone.assignedDrivers?.length && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No drivers assigned.</p>}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="outfit" style={{ marginBottom: '1rem', color: 'var(--info)' }}>Assigned Vehicles ({selectedZone.assignedVehicles?.length || 0})</h4>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '1rem' }}>
+                    <select value={zoneAssignVehicle} onChange={e => setZoneAssignVehicle(e.target.value)} style={{ flex: 1, padding: '8px', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: '8px', color: 'white', fontSize: '0.85rem' }}>
+                      <option value="">Select vehicle to add</option>
+                      {vehicles.map(v => <option key={v._id} value={v._id}>{v.plateNumber} - {v.name}</option>)}
+                    </select>
+                    <button style={{ padding: '8px 14px', fontSize: '0.8rem' }} onClick={() => handleZoneAssignVehicle(selectedZone._id)}>Add</button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedZone.assignedVehicles?.map(v => (
+                      <div key={v._id || v} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{v.plateNumber || v}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{v.name}</span>
+                      </div>
+                    ))}
+                    {!selectedZone.assignedVehicles?.length && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No vehicles assigned.</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Bill Statement Detail */}
+        {showBillDetailModal && selectedBill && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '560px', border: '1px solid var(--border-subtle)', borderRadius: '32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <h2 className="outfit" style={{ margin: 0 }}>Bill #{selectedBill.billNumber}</h2>
+                <button onClick={() => setShowBillDetailModal(false)} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button>
+              </div>
+              <div style={{ display: 'grid', gap: '1.2rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px' }}><p style={{ margin: '0 0 4px', fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>DRIVER</p><p style={{ margin: 0, fontWeight: 700 }}>{selectedBill.driverId?.name}</p><p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>{selectedBill.driverId?.phone}</p></div>
+                  <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px' }}><p style={{ margin: '0 0 4px', fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>STATUS</p><span className={`badge ${selectedBill.billStatus === 'paid' ? 'success' : selectedBill.isOverdue ? 'danger' : 'warning'}`}>{selectedBill.isOverdue ? 'OVERDUE' : (selectedBill.billStatus || '').toUpperCase()}</span></div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px' }}><p style={{ margin: '0 0 4px', fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>PERIOD START</p><p style={{ margin: 0 }}>{selectedBill.periodStartDate ? new Date(selectedBill.periodStartDate).toLocaleDateString() : '-'}</p></div>
+                  <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px' }}><p style={{ margin: '0 0 4px', fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>PERIOD END</p><p style={{ margin: 0 }}>{selectedBill.periodEndDate ? new Date(selectedBill.periodEndDate).toLocaleDateString() : '-'}</p></div>
+                </div>
+                <div style={{ padding: '1.5rem', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '12px', textAlign: 'center' }}>
+                  <p style={{ margin: '0 0 4px', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>TOTAL AMOUNT</p>
+                  <h2 className="outfit" style={{ margin: 0, fontSize: '2.5rem', color: selectedBill.finalAmount < 0 ? 'var(--danger)' : 'white' }}>₹{Math.abs(selectedBill.finalAmount || 0).toLocaleString()}</h2>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button style={{ flex: 1 }} onClick={() => { downloadCSV(`bill_${selectedBill.billNumber}.csv`, [['Bill','Driver','Phone','Period','Amount','Status'],[selectedBill.billNumber, selectedBill.driverId?.name, selectedBill.driverId?.phone, `${new Date(selectedBill.periodStartDate).toLocaleDateString()} - ${new Date(selectedBill.periodEndDate).toLocaleDateString()}`, selectedBill.finalAmount, selectedBill.billStatus]]); toast.success('Bill exported'); }}><Download size={14}/> Export</button>
+                  {selectedBill.billStatus !== 'paid' && <button style={{ flex: 1 }} onClick={async () => { await fetch(`/api/billing/${selectedBill._id}/pay`, { method: 'PUT', headers: { Authorization: `Bearer ${token()}` } }); fetchBills(); setShowBillDetailModal(false); toast.success('Payment recorded'); }}>Mark Paid</button>}
+                  <button onClick={() => setShowBillDetailModal(false)} className="secondary" style={{ flex: 1 }}>Close</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: 2FA Setup */}
+        {show2FAModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '440px', border: '1px solid var(--primary-accent)', borderRadius: '32px', textAlign: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}><button onClick={() => setShow2FAModal(false)} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button></div>
+              <Fingerprint size={48} color="var(--primary-accent)" style={{ marginBottom: '1.5rem' }}/>
+              <h2 className="outfit" style={{ margin: '0 0 1rem' }}>Two-Factor Authentication</h2>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>2FA via TOTP (Google Authenticator / Authy) will be enabled in a future security update. Your account is currently protected by JWT session tokens with configurable expiry.</p>
+              <button onClick={() => { setShow2FAModal(false); toast.info('2FA will be available in the next release.'); }} style={{ width: '100%' }}>Understood</button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Edit Profile */}
+        {showProfileEditModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '2rem' }}>
+            <div className="glass-pane animate-scale-in" style={{ padding: '2.5rem', width: '100%', maxWidth: '440px', border: '1px solid var(--primary-accent)', borderRadius: '32px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <h2 className="outfit" style={{ margin: 0 }}>Edit Profile</h2>
+                <button onClick={() => setShowProfileEditModal(false)} className="secondary" style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}>X</button>
+              </div>
+              <div style={{ display: 'grid', gap: '1.2rem' }}>
+                <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Full Name</label><input value={profileEditForm.name} onChange={e => setProfileEditForm({...profileEditForm, name: e.target.value})} placeholder="Your name" /></div>
+                <div><label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Phone Number</label><input value={profileEditForm.phone} onChange={e => setProfileEditForm({...profileEditForm, phone: e.target.value})} placeholder="+91 9999999999" /></div>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                  <button onClick={handleUpdateProfile} style={{ flex: 1 }}>Save Changes</button>
+                  <button onClick={() => setShowProfileEditModal(false)} className="secondary" style={{ flex: 1 }}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
 
       </main>
     </div>
