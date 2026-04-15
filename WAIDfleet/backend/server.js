@@ -12,11 +12,17 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerJsDoc = require("swagger-jsdoc");
 
 const connectDB = require("./config/db");
+const initAdmin = require("./utils/initAdmin");
 const { generalLimiter, authLimiter, paymentLimiter, adminLimiter } = require("./middleware/rateLimitMiddleware");
 const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
 
-// ✅ Connect DB
-connectDB();
+// ✅ Connect DB then seed default admin if absent
+connectDB()
+  .then(initAdmin)
+  .catch((err) => {
+    console.error("❌ Startup initialization failed:", err.message);
+    process.exit(1);
+  });
 
 const app = express();
 const server = http.createServer(app);
